@@ -1,0 +1,63 @@
+---
+# Process a single user - update or create account in PAM360
+
+- name: Find Account ID for {{ current_user.key }}
+  set_fact:
+    current_account_id: ""
+
+- name: Set account ID if found
+  set_fact:
+    current_account_id: "{{ item['ACCOUNT ID'] }}"
+  loop: "{{ existing_accounts_list }}"
+  when: item['ACCOUNT NAME'] == current_user.key
+  no_log: true
+
+- name: Debug account lookup
+  debug:
+    msg: "Account '{{ current_user.key }}' ID: {{ current_account_id if current_account_id | length > 0 else 'NOT FOUND - will create' }}"
+
+# -------------------------------------------------------
+# Case: Account Exists -> Update Password (API 3.2)
+# -------------------------------------------------------
+- name: Update Password for existing account {{ current_user.key }}
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts/{{ current_account_id }}/password"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "application/x-www-form-urlencoded"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"NEWPASSWORD":"{{ current_user.value }}","RESETTYPE":"LOCAL","REASON":"Rotated via Ansible"}}}'
+  when: current_account_id | length > 0
+  delegate_to: localhost
+  become: false
+  no_log: true
+  register: update_result
+
+- name: Log password update
+  debug:
+    msg: "Updated password for '{{ current_user.key }}' in PAM360"
+  when: current_account_id | length > 0
+
+# -------------------------------------------------------
+# Case: Account Missing -> Create Account (API 2.4)
+# -------------------------------------------------------
+- name: Create new account for {{ current_user.key }}
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
+    method: POST
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "application/x-www-form-urlencoded"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ current_user.key }}","PASSWORD":"{{ current_user.value }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
+  when: current_account_id | length == 0
+  delegate_to: localhost
+  become: false
+  no_log: true
+  register: create_result
+
+- name: Log account creation
+  debug:
+    msg: "Created account '{{ current_user.key }}' in PAM360"
+  when: current_account_id | length == 0

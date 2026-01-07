@@ -1,0 +1,239 @@
+---
+# =======================================================
+# 1. Generate Passwords for Target Users
+# =======================================================
+- name: Generate cleartext passwords for target users
+  set_fact:
+    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: lookup('password', '/dev/null length=14 chars=ascii_letters,digits') }) }}"
+  loop: "{{ pam_target_users }}"
+  no_log: true
+
+# =======================================================
+# 2. Check Resource Existence (API 1.1)
+# =======================================================
+- name: Fetch all resources from PAM360 to check existence
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+    return_content: yes
+  register: all_resources_response
+  delegate_to: localhost
+  become: false
+
+- name: Initialize resource tracking
+  set_fact:
+    pam_resource_id: ""
+    resource_was_created: false
+
+- name: Find Resource ID for current hostname
+  set_fact:
+    pam_resource_id: "{{ item['RESOURCE ID'] }}"
+  loop: "{{ all_resources_response.json.operation.Details | default([]) }}"
+  when: item['RESOURCE NAME'] == ansible_hostname
+  no_log: true
+
+- name: Debug resource check
+  debug:
+    msg: "Resource ID: {{ pam_resource_id if pam_resource_id | length > 0 else 'NOT FOUND - will create' }}"
+
+# =======================================================
+# 3. Logic Branch A: Resource Exists - Update Accounts
+# =======================================================
+- name: RESOURCE EXISTS - Process Accounts
+  block:
+    - name: Fetch existing accounts for the resource (API 2.1)
+      uri:
+        url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
+        method: GET
+        headers:
+          AUTHTOKEN: "{{ pam_token }}"
+        validate_certs: "{{ pam_validate_certs }}"
+      register: existing_accounts_response
+      delegate_to: localhost
+      become: false
+
+    - name: Build existing accounts list
+      set_fact:
+        existing_accounts_list: "{{ existing_accounts_response.json.operation.Details['ACCOUNT LIST'] | default([]) }}"
+
+    - name: Loop through users to Update or Create Accounts
+      include_tasks: process_user.yml
+      loop: "{{ user_pass_map | dict2items }}"
+      loop_control:
+        loop_var: current_user
+
+  when: pam_resource_id | length > 0
+
+# =======================================================
+# 4. Logic Branch B: Resource Does Not Exist - Create It
+# =======================================================
+- name: Set first user for resource creation
+  set_fact:
+    first_user: "{{ pam_target_users | first }}"
+    first_pass: "{{ user_pass_map[pam_target_users | first] }}"
+    remaining_users: "{{ pam_target_users[1:] }}"
+  when: pam_resource_id | length == 0
+
+- name: Create New Resource in PAM360 (API 1.2)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources"
+    method: POST
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "application/x-www-form-urlencoded"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_default_ipv4.address }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
+  register: create_resource_response
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: pam_resource_id | length == 0
+
+- name: Debug resource creation
+  debug:
+    msg: "Resource creation: {{ create_resource_response.json.operation.result.message | default('Skipped') }}"
+  when: create_resource_response is defined and create_resource_response.json is defined
+
+- name: Fetch ID of newly created resource (API 1.3)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_hostname }}"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: new_resource_data
+  delegate_to: localhost
+  become: false
+  when: pam_resource_id | length == 0
+
+- name: Set new Resource ID and flag
+  set_fact:
+    pam_resource_id: "{{ new_resource_data.json.operation.Details['RESOURCEID'] }}"
+    resource_was_created: true
+  when: new_resource_data is defined and new_resource_data.json is defined
+
+- name: Debug new resource ID
+  debug:
+    msg: "New Resource ID: {{ pam_resource_id }}"
+  when: resource_was_created | default(false)
+
+# =======================================================
+# 5. Create Remaining Accounts (API 2.4) - After Resource Creation
+# =======================================================
+- name: Debug remaining users to add
+  debug:
+    msg: "Remaining users to add: {{ remaining_users | default([]) }}"
+  when: resource_was_created | default(false)
+
+- name: Create remaining accounts (API 2.4)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
+    method: POST
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "application/x-www-form-urlencoded"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ item }}","PASSWORD":"{{ user_pass_map[item] }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
+  loop: "{{ remaining_users | default([]) }}"
+  delegate_to: localhost
+  become: false
+  no_log: true
+  register: create_accounts_result
+  when:
+    - resource_was_created | default(false)
+    - remaining_users | default([]) | length > 0
+
+- name: Debug account creation result
+  debug:
+    msg: "Created account: {{ item.item }} - {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ create_accounts_result.results | default([]) }}"
+  when:
+    - create_accounts_result is defined
+    - create_accounts_result.results is defined
+    - item.json is defined
+  no_log: false
+
+# =======================================================
+# 5. Share Resource (API 9.1)
+# =======================================================
+- name: Share Resource with User
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "application/x-www-form-urlencoded"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERID":"{{ pam_share_user_id }}"}}}'
+  register: share_response
+  delegate_to: localhost
+  become: false
+  when: pam_resource_id is defined
+
+- name: Debug share result
+  debug:
+    msg: "Share result: {{ share_response.json.operation.result.message | default('Skipped') }}"
+  when: share_response is defined
+
+# =======================================================
+# 6. Associate Resource to Resource Group (API 6.2)
+# =======================================================
+- name: Get Resource Group ID
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroups/resourcegroupname/{{ pam_resource_group_name | urlencode }}"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+    status_code: [200, 404]
+  register: resource_group_response
+  delegate_to: localhost
+  become: false
+  when: pam_resource_id is defined
+
+- name: Set Resource Group ID
+  set_fact:
+    pam_resource_group_id: "{{ resource_group_response.json.operation.Details['RESOURCEGROUPID'] | default('') }}"
+  when: 
+    - resource_group_response is defined
+    - resource_group_response.json is defined
+    - resource_group_response.json.operation.Details is defined
+
+- name: Debug resource group ID
+  debug:
+    msg: "Resource Group '{{ pam_resource_group_name }}' ID: {{ pam_resource_group_id | default('NOT FOUND') }}"
+
+- name: Associate Resource to Resource Group (API 6.2)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroups/{{ pam_resource_group_id }}/resources"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "application/x-www-form-urlencoded"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCEIDS":["{{ pam_resource_id }}"]}}}'
+  register: associate_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - pam_resource_group_id is defined
+    - pam_resource_group_id | length > 0
+
+- name: Debug association result
+  debug:
+    msg: "Association result: {{ associate_response.json.operation.result.message | default('Skipped') }}"
+  when: associate_response is defined and associate_response.json is defined
+
+# =======================================================
+# 7. Update Remote Host Passwords (AFTER PAM360 sync)
+# =======================================================
+- name: Update Remote Linux Users with new passwords
+  include_tasks: update_passwords.yml
+  loop: "{{ user_pass_map | dict2items }}"
+  loop_control:
+    loop_var: current_user
+  no_log: true

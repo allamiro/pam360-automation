@@ -1,0 +1,19 @@
+---
+# PAM360 Password Sync Playbook
+
+- name: Sync passwords with PAM360
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    pam_url: "https://10.0.0.14:8282"
+    pam_token: ""
+    pam_target_users:
+      - root
+      - admin
+    pam_resource_group_name: "Linux Servers"
+    pam_share_user_id: "1"
+
+  roles:
+    - pam360_sync

@@ -1,0 +1,7 @@
+[linux_servers]
+10.0.30.110
+
+[linux_servers:vars]
+ansible_user=ansible
+ansible_become=true
+ansible_become_method=sudo

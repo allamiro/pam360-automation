@@ -1,0 +1,18 @@
+---
+# PAM360 Connection Details
+pam_url: "https://pam.url.local.domain"
+pam_token: "YOUR_AUTH_TOKEN_HERE"
+
+# Target users for password rotation
+pam_target_users:
+  - root
+  - admin
+
+# Resource group name
+pam_resource_group_name: "Linux Servers"
+
+# User ID to share resources with
+pam_share_user_id: "1"
+
+# Security: Don't validate certs for self-signed PAM360 servers
+pam_validate_certs: false
