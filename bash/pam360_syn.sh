@@ -1,154 +1,171 @@
 
 #!/bin/bash
+set -euo pipefail
 
 # =======================================================
-# 1. Initialize Constants
+# PAM360 Password Sync Script
+# Rotates local passwords and syncs with PAM360
 # =======================================================
-PAM_TOKEN="6892524E-0EE0-44F7-959F-5E2AE7EB6529"
-PAM_URL="https://10.0.0.14:8282" 
-# Users to manage on this system
-TARGET_USERS=('root' 'user') 
-# The PAM360 Resource Group to assign new resources to
-RESOURCE_GROUP_NAME="Linux Servers" 
-# The User ID to grant full access to (Step 7)
-SHARE_USER_ID="allamiro" 
+
+# =======================================================
+# 1. Configuration
+# =======================================================
+PAM_TOKEN="${PAM_TOKEN:-YOUR_AUTH_TOKEN_HERE}"
+PAM_URL="${PAM_URL:-https://10.0.0.14:8282}"
+TARGET_USERS=('root' 'admin')
+RESOURCE_GROUP_NAME="Linux Servers"
+SHARE_USER_ID="1"  # User ID (numeric) to share with
 
 # Get system details
 SYSTEM_NAME=$(hostname)
-IP_ADDRESS=$(hostname -I | awk '{print $1}')
+IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
 
-# Dictionary to hold the new passwords so we can send them to the API later
+# Password storage
 declare -A USER_PASSWORDS
 
-# =======================================================
-# 2. Local Password Rotation
-# =======================================================
-# Loop through the target users, change their local password, and save it
-for user in "${TARGET_USERS[@]}"; do
-    # Generate a random 14 char password
-    password=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 14 | head -n 1)
-    
-    # Save to array for API steps later
-    USER_PASSWORDS[$user]=$password
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
-    # Change password locally on the Linux system
-    # 'chpasswd' is safer for scripting than 'passwd --stdin'
-    echo "$user:$password" | chpasswd
-    echo "Changed local password for $user"
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# =======================================================
+# 2. Generate Passwords (BEFORE any changes)
+# =======================================================
+log_info "Generating passwords for target users..."
+
+for user in "${TARGET_USERS[@]}"; do
+    password=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | fold -w 14 | head -n 1)
+    USER_PASSWORDS[$user]=$password
+    log_info "Generated password for $user"
 done
 
 # =======================================================
-# 3. Get Resource ID for this Hostname
+# 3. Check Resource Existence (API 1.1)
 # =======================================================
-# API 1.1: Get Resources
-# We filter the output to see if this specific hostname already exists in PAM360
-# NOTE: We use --data-urlencode for INPUT_DATA to handle JSON special characters automatically
+log_info "Checking if resource '$SYSTEM_NAME' exists in PAM360..."
 
-echo "Checking if Resource $SYSTEM_NAME exists in PAM360..."
-
-ALL_RESOURCES=$(curl -s -k -X GET -H "AUTHTOKEN: $PAM_TOKEN" "$PAM_URL/restapi/json/v1/resources")
-RSRCID=$(echo "$ALL_RESOURCES" | jq -r '.operation.Details[] | select(."RESOURCE NAME" == "'$SYSTEM_NAME'") | ."RESOURCE ID"')
+ALL_RESOURCES=$(curl -s -k -H "AUTHTOKEN:$PAM_TOKEN" "$PAM_URL/restapi/json/v1/resources")
+RSRCID=$(echo "$ALL_RESOURCES" | jq -r --arg name "$SYSTEM_NAME" '.operation.Details[] | select(."RESOURCE NAME" == $name) | ."RESOURCE ID"' 2>/dev/null || echo "")
 
 # =======================================================
-# 4. Logic Flow: Exists vs Not Exists
+# 4. Logic Branch A: Resource Exists
 # =======================================================
-
 if [ -n "$RSRCID" ] && [ "$RSRCID" != "null" ]; then
-    # ---------------------------------------------------
-    # 5. Resource Exists: Update or Create Accounts
-    # ---------------------------------------------------
-    echo "Resource found (ID: $RSRCID). Checking accounts..."
+    log_info "Resource found (ID: $RSRCID). Processing accounts..."
 
-    # API 2.1: Get Accounts for this Resource
-    EXISTING_ACCOUNTS=$(curl -s -k -X GET -H "AUTHTOKEN: $PAM_TOKEN" "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts")
+    # API 2.1: Get existing accounts
+    EXISTING_ACCOUNTS=$(curl -s -k -H "AUTHTOKEN:$PAM_TOKEN" "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts")
 
     for user in "${TARGET_USERS[@]}"; do
-        # Retrieve the password we generated in Step 2
         CURRENT_PASSWORD="${USER_PASSWORDS[$user]}"
-
-        # Check if account exists in the JSON response
-        ACCOUNT_ID=$(echo "$EXISTING_ACCOUNTS" | jq -r '.operation.Details["ACCOUNT LIST"][] | select(."ACCOUNT NAME" == "'$user'") | ."ACCOUNT ID"')
+        ACCOUNT_ID=$(echo "$EXISTING_ACCOUNTS" | jq -r --arg user "$user" '.operation.Details["ACCOUNT LIST"][] | select(."ACCOUNT NAME" == $user) | ."ACCOUNT ID"' 2>/dev/null || echo "")
 
         if [ -n "$ACCOUNT_ID" ] && [ "$ACCOUNT_ID" != "null" ]; then
-            # 5b. Account Exists -> Update Password
-            # API 3.2: Change Password
-            # RESETTYPE is LOCAL because we already changed it on the server in Step 2
-            echo "Updating password for existing account $user (ID: $ACCOUNT_ID)..."
+            # API 3.2: Update existing account password
+            log_info "Updating password for account '$user' (ID: $ACCOUNT_ID)..."
             
-            update_json='{"operation":{"Details":{"NEWPASSWORD":"'$CURRENT_PASSWORD'","RESETTYPE":"LOCAL","REASON":"Rotated via Script"}}}'
+            RESULT=$(curl -s -k -X PUT -H "AUTHTOKEN:$PAM_TOKEN" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts/$ACCOUNT_ID/password" \
+                --data-urlencode "INPUT_DATA={\"operation\":{\"Details\":{\"NEWPASSWORD\":\"$CURRENT_PASSWORD\",\"RESETTYPE\":\"LOCAL\",\"REASON\":\"Rotated via Script\"}}}")
             
-            curl -s -k -X PUT -H "AUTHTOKEN: $PAM_TOKEN" \
-                 "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts/$ACCOUNT_ID/password" \
-                 --data-urlencode "INPUT_DATA=$update_json"
-
+            STATUS=$(echo "$RESULT" | jq -r '.operation.result.status' 2>/dev/null || echo "Unknown")
+            [ "$STATUS" == "Success" ] && log_info "Password updated for '$user'" || log_warn "Update result: $STATUS"
         else
-            # 5c. Account Missing -> Create Account
-            # API 2.4: Create Accounts under Specific Resource
-            echo "Account $user not found. Creating..."
+            # API 2.4: Create new account
+            log_info "Account '$user' not found. Creating..."
             
-            create_account_json='{"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"'$user'","PASSWORD":"'$CURRENT_PASSWORD'","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
+            RESULT=$(curl -s -k -X POST -H "AUTHTOKEN:$PAM_TOKEN" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts" \
+                --data-urlencode "INPUT_DATA={\"operation\":{\"Details\":{\"ACCOUNTLIST\":[{\"ACCOUNTNAME\":\"$user\",\"PASSWORD\":\"$CURRENT_PASSWORD\",\"ACCOUNTPASSWORDPOLICY\":\"Strong\"}]}}}")
             
-            curl -s -k -X POST -H "AUTHTOKEN: $PAM_TOKEN" \
-                 "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts" \
-                 --data-urlencode "INPUT_DATA=$create_account_json"
+            STATUS=$(echo "$RESULT" | jq -r '.operation.result.status' 2>/dev/null || echo "Unknown")
+            [ "$STATUS" == "Success" ] && log_info "Account '$user' created" || log_warn "Create result: $STATUS"
         fi
     done
 
+# =======================================================
+# 5. Logic Branch B: Resource Does Not Exist
+# =======================================================
 else
-    # ---------------------------------------------------
-    # 6. Resource Does Not Exist: Create Resource & Accounts
-    # ---------------------------------------------------
-    echo "Resource $SYSTEM_NAME not found. Creating new resource..."
+    log_info "Resource '$SYSTEM_NAME' not found. Creating..."
 
-    # We use the first user in our list to create the initial resource
     FIRST_USER="${TARGET_USERS[0]}"
     FIRST_PASS="${USER_PASSWORDS[$FIRST_USER]}"
 
-    # API 1.2: Create New Resource
-    # Added RESOURCEGROUPNAME to automatically assign it to the group (Requirement 3)
-    resource_json='{"operation":{"Details":{"RESOURCENAME":"'$SYSTEM_NAME'","ACCOUNTNAME":"'$FIRST_USER'","RESOURCETYPE":"Linux","PASSWORD":"'$FIRST_PASS'","RESOURCEURL":"'$IP_ADDRESS'","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"'$RESOURCE_GROUP_NAME'"}}}'
-
-    curl -s -k -X POST -H "AUTHTOKEN: $PAM_TOKEN" \
-         "$PAM_URL/restapi/json/v1/resources" \
-         --data-urlencode "INPUT_DATA=$resource_json"
-
-    # Fetch the new ID by name (API 1.3) because Create response structure varies
-    RSRCID_JSON=$(curl -s -k -X GET -H "AUTHTOKEN: $PAM_TOKEN" "$PAM_URL/restapi/json/v1/resources/resourcename/$SYSTEM_NAME")
-    RSRCID=$(echo "$RSRCID_JSON" | jq -r '.operation.Details."RESOURCEID"')
+    # API 1.2: Create new resource with first account
+    # NOTE: Use DNSNAME for IP address, not RESOURCEURL
+    RESULT=$(curl -s -k -X POST -H "AUTHTOKEN:$PAM_TOKEN" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        "$PAM_URL/restapi/json/v1/resources" \
+        --data-urlencode "INPUT_DATA={\"operation\":{\"Details\":{\"RESOURCENAME\":\"$SYSTEM_NAME\",\"ACCOUNTNAME\":\"$FIRST_USER\",\"RESOURCETYPE\":\"Linux\",\"PASSWORD\":\"$FIRST_PASS\",\"DNSNAME\":\"$IP_ADDRESS\",\"RESOURCEPASSWORDPOLICY\":\"Strong\",\"ACCOUNTPASSWORDPOLICY\":\"Strong\",\"RESOURCEGROUPNAME\":\"$RESOURCE_GROUP_NAME\"}}}")
     
-    echo "New Resource ID is: $RSRCID"
+    MESSAGE=$(echo "$RESULT" | jq -r '.operation.result.message' 2>/dev/null || echo "Unknown")
+    log_info "Resource creation: $MESSAGE"
 
-    # 6b. Create the REST of the accounts (skipping the first one we just used)
-    # Loop starting from index 1
+    # API 1.3: Get new resource ID
+    RSRCID_JSON=$(curl -s -k -H "AUTHTOKEN:$PAM_TOKEN" "$PAM_URL/restapi/json/v1/resources/resourcename/$SYSTEM_NAME")
+    RSRCID=$(echo "$RSRCID_JSON" | jq -r '.operation.Details.RESOURCEID' 2>/dev/null || echo "")
+    
+    if [ -z "$RSRCID" ] || [ "$RSRCID" == "null" ]; then
+        log_error "Failed to get resource ID"
+        exit 1
+    fi
+    
+    log_info "New Resource ID: $RSRCID"
+
+    # API 2.4: Create remaining accounts
     for i in "${!TARGET_USERS[@]}"; do
         if [ $i -gt 0 ]; then
             user="${TARGET_USERS[$i]}"
             pass="${USER_PASSWORDS[$user]}"
             
-            echo "Adding additional account $user..."
+            log_info "Adding account '$user'..."
             
-            # API 2.4: Create Accounts
-            add_acct_json='{"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"'$user'","PASSWORD":"'$pass'","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
-
-            curl -s -k -X POST -H "AUTHTOKEN: $PAM_TOKEN" \
-                 "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts" \
-                 --data-urlencode "INPUT_DATA=$add_acct_json"
+            RESULT=$(curl -s -k -X POST -H "AUTHTOKEN:$PAM_TOKEN" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                "$PAM_URL/restapi/json/v1/resources/$RSRCID/accounts" \
+                --data-urlencode "INPUT_DATA={\"operation\":{\"Details\":{\"ACCOUNTLIST\":[{\"ACCOUNTNAME\":\"$user\",\"PASSWORD\":\"$pass\",\"ACCOUNTPASSWORDPOLICY\":\"Strong\"}]}}}")
+            
+            STATUS=$(echo "$RESULT" | jq -r '.operation.result.status' 2>/dev/null || echo "Unknown")
+            [ "$STATUS" == "Success" ] && log_info "Account '$user' created" || log_warn "Create result: $STATUS"
         fi
     done
 fi
 
 # =======================================================
-# 7. Update Permissions (Sharing)
+# 6. Share Resource (API 9.1)
 # =======================================================
-# API 9.1: Share Resource
 if [ -n "$RSRCID" ] && [ "$RSRCID" != "null" ]; then
-    echo "Sharing Resource $RSRCID with User $SHARE_USER_ID..."
+    log_info "Sharing resource $RSRCID with user ID $SHARE_USER_ID..."
 
-    share_json='{"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERID":"'$SHARE_USER_ID'"}}}'
-
-    curl -s -k -X PUT -H "AUTHTOKEN: $PAM_TOKEN" \
-         "$PAM_URL/restapi/json/v1/resources/$RSRCID/share" \
-         --data-urlencode "INPUT_DATA=$share_json"
+    RESULT=$(curl -s -k -X PUT -H "AUTHTOKEN:$PAM_TOKEN" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        "$PAM_URL/restapi/json/v1/resources/$RSRCID/share" \
+        --data-urlencode "INPUT_DATA={\"operation\":{\"Details\":{\"ACCESSTYPE\":\"fullaccess\",\"USERID\":\"$SHARE_USER_ID\"}}}")
+    
+    MESSAGE=$(echo "$RESULT" | jq -r '.operation.result.message' 2>/dev/null || echo "Unknown")
+    log_info "Share result: $MESSAGE"
 fi
 
-echo "Script execution complete."
+# =======================================================
+# 7. Update Local Passwords (AFTER PAM360 sync)
+# =======================================================
+log_info "Updating local passwords..."
+
+for user in "${TARGET_USERS[@]}"; do
+    if id "$user" &>/dev/null; then
+        echo "$user:${USER_PASSWORDS[$user]}" | chpasswd
+        log_info "Changed local password for '$user'"
+    else
+        log_warn "User '$user' does not exist locally, skipping"
+    fi
+done
+
+log_info "Script execution complete."
