@@ -3,7 +3,7 @@
 
 - name: Sync passwords with PAM360
   hosts: all
-  gather_facts: true
+  gather_facts: false
   become: true
 
   vars:
@@ -12,10 +12,21 @@
     pam_target_users:
       - root
       - admin
+      - jdoe
+      - trump
     pam_resource_group_name: "Linux Servers"
     pam_share_user_names: 
       - "admin"
-      - "tsuliman"
+    
+    # User group sharing (preferred over individual users)
+    pam_share_group_names:
+      - "LINUX ADMINS"
+    
+    # Password file options
+    pam_create_password_file: false  # Set to false to disable KeePass CSV generation
+    
+    # Local account options
+    pam_create_local_accounts: true  # Set to true to create local accounts if they don't exist
 
   roles:
     - pam360_sync

@@ -1,10 +1,30 @@
 ---
 # =======================================================
-# 0. Initialize Status Tracking
+# 0. Initialize Status Tracking and System Info
 # =======================================================
 - name: Initialize user status tracking
   set_fact:
     user_status: {}
+
+- name: Get hostname from command
+  command: hostname
+  register: hostname_cmd
+  changed_when: false
+
+- name: Get IP addresses from command
+  command: hostname -I
+  register: ip_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Set system info variables
+  set_fact:
+    system_hostname: "{{ hostname_cmd.stdout | trim }}"
+    system_ip: "{{ (ip_cmd.stdout | trim).split() | first | default('127.0.0.1') }}"
+
+- name: Debug system info
+  debug:
+    msg: "System: {{ system_hostname }} ({{ system_ip }})"
 
 # =======================================================
 # 1. Lookup PAM360 Share User IDs from Usernames (API 4.5)
@@ -26,6 +46,17 @@
   loop: "{{ pam_share_user_names | default([]) }}"
   when: pam_share_user_names is defined
 
+- name: Debug raw user lookup responses
+  debug:
+    msg: |
+      User: {{ item.item }}
+      Status: {{ item.json.operation.result.status | default('N/A') }}
+      Message: {{ item.json.operation.result.message | default('N/A') }}
+      UserID: {{ item.json.operation.Details.USERID | default('NOT FOUND') }}
+      Full Response: {{ item.json | default({}) }}
+  loop: "{{ share_user_lookups.results | default([]) }}"
+  when: share_user_lookups.results is defined
+
 - name: Build share users list with IDs
   set_fact:
     pam_share_users: "{{ pam_share_users + [{'name': item.item, 'id': item.json.operation.Details.USERID}] }}"
@@ -33,19 +64,67 @@
   when:
     - item.json is defined
     - item.json.operation.result.status == 'Success'
-  no_log: true
 
 - name: Debug share users lookup
   debug:
-    msg: "PAM360 share users: {{ pam_share_users | map(attribute='name') | list }} -> IDs: {{ pam_share_users | map(attribute='id') | list }}"
-  when: pam_share_users | length > 0
+    msg: |
+      Share users configured: {{ pam_share_user_names | default([]) }}
+      Share users resolved: {{ pam_share_users | length }} users
+      Names: {{ pam_share_users | map(attribute='name') | list }}
+      IDs: {{ pam_share_users | map(attribute='id') | list }}
+
+# =======================================================
+# 1b. Lookup PAM360 User Group IDs from Names (API 5.1)
+# =======================================================
+- name: Initialize share groups list
+  set_fact:
+    pam_share_groups: []
+
+- name: Get PAM360 user group IDs from names (API 5.1)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/user/getUserGroupId?USERGROUPNAME={{ item | urlencode }}"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: share_group_lookups
+  delegate_to: localhost
+  become: false
+  loop: "{{ pam_share_group_names | default([]) }}"
+  when: pam_share_group_names is defined and pam_share_group_names | length > 0
+
+- name: Debug raw group lookup responses
+  debug:
+    msg: |
+      Group: {{ item.item }}
+      Status: {{ item.json.operation.result.status | default('N/A') }}
+      Message: {{ item.json.operation.result.message | default('N/A') }}
+      GroupID: {{ item.json.operation.Details.USERGROUPID | default('NOT FOUND') }}
+  loop: "{{ share_group_lookups.results | default([]) }}"
+  when: share_group_lookups.results is defined
+
+- name: Build share groups list with IDs
+  set_fact:
+    pam_share_groups: "{{ pam_share_groups + [{'name': item.item, 'id': item.json.operation.Details.USERGROUPID | string}] }}"
+  loop: "{{ share_group_lookups.results | default([]) }}"
+  when:
+    - item.json is defined
+    - item.json.operation.result.status == 'Success'
+
+- name: Debug share groups lookup
+  debug:
+    msg: |
+      Share groups configured: {{ pam_share_group_names | default([]) }}
+      Share groups resolved: {{ pam_share_groups | length }} groups
+      Names: {{ pam_share_groups | map(attribute='name') | list }}
+      IDs: {{ pam_share_groups | map(attribute='id') | list }}
 
 # =======================================================
 # 2. Generate Passwords for Target Users
 # =======================================================
 - name: Generate cleartext passwords for target users
   set_fact:
-    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: (lookup('password', '/dev/null length=1 chars=ascii_letters') ~ lookup('password', '/dev/null length=10 chars=ascii_letters,digits') ~ lookup('password', '/dev/null length=1 chars=.,!@#$%') ~ lookup('password', '/dev/null length=2 chars=digits')) }) }}"
+    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: (lookup('password', '/dev/null length=1 chars=ascii_letters') ~ lookup('password', '/dev/null length=10 chars=ascii_letters,digits') ~ lookup('password', '/dev/null length=1 chars=.,!@#$') ~ lookup('password', '/dev/null length=2 chars=digits')) }) }}"
   loop: "{{ pam_target_users }}"
   no_log: true
 
@@ -69,16 +148,26 @@
     pam_resource_id: ""
     resource_was_created: false
 
+- name: Debug all resources from PAM360
+  debug:
+    msg: |
+      Searching for hostname: '{{ system_hostname }}'
+      Total resources in PAM360: {{ all_resources_response.json.operation.Details | default([]) | length }}
+      Resource names in PAM360: {{ all_resources_response.json.operation.Details | default([]) | map(attribute='RESOURCE NAME') | list }}
+
 - name: Find Resource ID for current hostname
   set_fact:
     pam_resource_id: "{{ item['RESOURCE ID'] }}"
   loop: "{{ all_resources_response.json.operation.Details | default([]) }}"
-  when: item['RESOURCE NAME'] == ansible_facts.hostname
+  when: item['RESOURCE NAME'] == system_hostname
   no_log: true
 
 - name: Debug resource check
   debug:
-    msg: "Resource ID: {{ pam_resource_id if pam_resource_id | length > 0 else 'NOT FOUND - will create' }}"
+    msg: |
+      Hostname: '{{ system_hostname }}'
+      Resource ID: {{ pam_resource_id if pam_resource_id | length > 0 else 'NOT FOUND - will create' }}
+      Match found: {{ 'YES' if pam_resource_id | length > 0 else 'NO' }}
 
 # =======================================================
 # 3. Logic Branch A: Resource Exists - Update Accounts
@@ -126,7 +215,7 @@
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_facts.hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_facts.default_ipv4.address }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ system_hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ system_ip }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
   register: create_resource_response
   delegate_to: localhost
   become: false
@@ -140,7 +229,7 @@
 
 - name: Fetch ID of newly created resource (API 1.3)
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_facts.hostname }}"
+    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ system_hostname }}"
     method: GET
     headers:
       AUTHTOKEN: "{{ pam_token }}"
@@ -228,6 +317,15 @@
 # =======================================================
 # 5b. Share Accounts with Users (API 9.5)
 # =======================================================
+- name: Debug sharing prerequisites
+  debug:
+    msg: |
+      === SHARING PREREQUISITES ===
+      Resource ID: {{ pam_resource_id | default('NOT SET') }}
+      Share users count: {{ pam_share_users | length }}
+      Share users: {{ pam_share_users | default([]) }}
+      Will share: {{ 'YES' if (pam_resource_id | default('') | length > 0 and pam_share_users | length > 0) else 'NO - missing prerequisites' }}
+
 - name: Get account IDs for sharing
   uri:
     url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
@@ -239,6 +337,13 @@
   delegate_to: localhost
   become: false
   when: pam_resource_id is defined
+
+- name: Debug accounts for sharing
+  debug:
+    msg: |
+      Accounts available for sharing:
+      {{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) | map(attribute='ACCOUNT NAME') | list }}
+  when: accounts_for_sharing is defined and accounts_for_sharing.json is defined
 
 - name: Build account-user share combinations
   set_fact:
@@ -275,6 +380,74 @@
   when:
     - share_accounts_response is defined
     - share_accounts_response.results is defined
+    - item.json is defined
+
+# =======================================================
+# 5c. Share Resource with User Groups (API 9.3)
+# =======================================================
+- name: Share Resource with User Groups (API 9.3)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERGROUPID":"{{ item.id }}"}}}'
+  loop: "{{ pam_share_groups | default([]) }}"
+  register: share_group_responses
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - pam_share_groups | length > 0
+
+- name: Debug group share results
+  debug:
+    msg: "Shared resource with group '{{ item.item.name }}': {{ item.json.operation.result.message | default('Skipped') }}"
+  loop: "{{ share_group_responses.results | default([]) }}"
+  when:
+    - share_group_responses is defined
+    - item.json is defined
+
+# =======================================================
+# 5d. Share Accounts with User Groups (API 9.7)
+# =======================================================
+- name: Build account-group share combinations
+  set_fact:
+    account_group_shares: "{{ account_group_shares | default([]) + [{'account_id': item.0['ACCOUNT ID'], 'account_name': item.0['ACCOUNT NAME'], 'group_id': item.1.id, 'group_name': item.1.name}] }}"
+  loop: "{{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) | product(pam_share_groups | default([])) | list }}"
+  when:
+    - accounts_for_sharing is defined
+    - accounts_for_sharing.json is defined
+    - pam_share_groups | length > 0
+  no_log: true
+
+- name: Share each account with each user group (API 9.7)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts/{{ item.account_id }}/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"modify","USERGROUPID":"{{ item.group_id }}"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ account_group_shares | default([]) }}"
+  register: share_accounts_group_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - account_group_shares is defined
+
+- name: Debug account group share results
+  debug:
+    msg: "Shared account '{{ item.item.account_name }}' with group '{{ item.item.group_name }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_accounts_group_response.results | default([]) }}"
+  when:
+    - share_accounts_group_response is defined
+    - share_accounts_group_response.results is defined
     - item.json is defined
 
 # =======================================================
@@ -353,6 +526,66 @@
   when: associate_response is defined and associate_response.json is defined
 
 # =======================================================
+# 6b. Share Resource Group with User Groups (API 9.10)
+# =======================================================
+- name: Share Resource Group with User Groups (API 9.10)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroup/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"resourceGroupIds":["{{ pam_resource_group_id }}"],"userGroupIds":["{{ item.id }}"],"accessType":"fullaccess"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ pam_share_groups | default([]) }}"
+  register: share_resource_group_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_group_id is defined
+    - pam_share_groups | length > 0
+
+- name: Debug resource group sharing results
+  debug:
+    msg: "Shared resource group '{{ pam_resource_group_name }}' with group '{{ item.item.name }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_resource_group_response.results | default([]) }}"
+  when:
+    - share_resource_group_response is defined
+    - share_resource_group_response.results is defined
+    - item.json is defined
+
+# =======================================================
+# 6c. Share Resource Group with Users (API 9.9)
+# =======================================================
+- name: Share Resource Group with Users (API 9.9)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroup/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"resourceGroupIds":["{{ pam_resource_group_id }}"],"userIds":["{{ item.id }}"],"accessType":"fullaccess"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ pam_share_users | default([]) }}"
+  register: share_resource_group_users_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_group_id is defined
+    - pam_share_users | length > 0
+
+- name: Debug resource group user sharing results
+  debug:
+    msg: "Shared resource group '{{ pam_resource_group_name }}' with user '{{ item.item.name }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_resource_group_users_response.results | default([]) }}"
+  when:
+    - share_resource_group_users_response is defined
+    - share_resource_group_users_response.results is defined
+    - item.json is defined
+
+# =======================================================
 # 7. Update Remote Host Passwords (AFTER PAM360 sync)
 # =======================================================
 - name: Update Remote Linux Users with new passwords
@@ -362,13 +595,14 @@
     loop_var: current_user
 
 # =======================================================
-# 8. Generate KeePass-Compatible Password Record
+# 8. Generate KeePass-Compatible Password Record (Optional)
 # =======================================================
 - name: Set timestamp for password file
   set_fact:
     password_file_timestamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
   delegate_to: localhost
   run_once: true
+  when: pam_create_password_file | default(true)
 
 - name: Create password record directory
   file:
@@ -378,6 +612,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: pam_create_password_file | default(true)
 
 - name: Generate KeePass CSV header (once per run)
   copy:
@@ -388,21 +623,30 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: pam_create_password_file | default(true)
 
 - name: Append password records to CSV
   lineinfile:
     path: "{{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
-    line: '"{{ pam_resource_group_name }}","{{ ansible_facts.hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ ansible_facts.default_ipv4.address }}","Rotated: {{ ansible_facts.date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
+    line: '"{{ pam_resource_group_name }}","{{ system_hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ system_ip }}","Rotated: {{ ansible_facts.date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
     insertafter: EOF
   loop: "{{ user_pass_map | dict2items }}"
   delegate_to: localhost
   become: false
   no_log: true
+  when: pam_create_password_file | default(true)
 
 - name: Display password file location
   debug:
     msg: "Password record saved to: {{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
   run_once: true
+  when: pam_create_password_file | default(true)
+
+- name: Display password file skipped
+  debug:
+    msg: "Password file creation skipped (pam_create_password_file: false)"
+  run_once: true
+  when: not (pam_create_password_file | default(true))
 
 # =======================================================
 # 9. Fetch Final Account List from PAM360 (API 2.1)
@@ -439,7 +683,7 @@
   debug:
     msg: |
       ============================================
-      PAM360 SYNC SUMMARY - {{ ansible_facts.hostname }}
+      PAM360 SYNC SUMMARY - {{ system_hostname }}
       ============================================
       Resource ID: {{ pam_resource_id }}
       Resource Group: {{ pam_resource_group_name }} (ID: {{ pam_resource_group_id | default('N/A') }})
