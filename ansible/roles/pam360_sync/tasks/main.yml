@@ -327,6 +327,19 @@
   become: false
   when: pam_resource_id is defined
 
+- name: Get individual account details (API 2.2)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts/{{ item['ACCOUNT ID'] }}"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  loop: "{{ final_accounts.json.operation.Details['ACCOUNT LIST'] | default([]) }}"
+  register: account_details
+  delegate_to: localhost
+  become: false
+  when: final_accounts is defined and final_accounts.json is defined
+
 # =======================================================
 # 9. Print Summary Report
 # =======================================================
@@ -344,8 +357,17 @@
         {{ user }}: PAM360={{ 'CREATED' if status.created_in_pam | default(false) else ('UPDATED' if status.updated_pam | default(false) else ('FAILED' if status.api_failed | default(false) else 'NO CHANGE')) }}, Linux={{ 'ROTATED' if status.rotated_linux | default(false) else ('SKIPPED' if status.skipped_missing_local | default(false) else 'NO CHANGE') }}
       {% endfor %}
       
-      PAM360 ACCOUNTS (confirmed from API):
+      PAM360 ACCOUNTS (confirmed from API 2.1 & 2.2):
       {% for acc in final_accounts.json.operation.Details['ACCOUNT LIST'] | default([]) %}
         - {{ acc['ACCOUNT NAME'] }} (ID: {{ acc['ACCOUNT ID'] }}, Policy: {{ acc['ACCOUNT PASSWORD POLICY'] }})
+      {% endfor %}
+      
+      ACCOUNT DETAILS:
+      {% for result in account_details.results | default([]) %}
+      {% if result.json is defined and result.json.operation is defined %}
+        {{ result.item['ACCOUNT NAME'] }}:
+          Last Modified: {{ result.json.operation.Details['LAST MODIFIED TIME'] | default('N/A') }}
+          Last Accessed: {{ result.json.operation.Details['LAST ACCESSED TIME'] | default('N/A') }}
+      {% endif %}
       {% endfor %}
       ============================================
