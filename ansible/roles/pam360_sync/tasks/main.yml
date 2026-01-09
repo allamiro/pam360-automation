@@ -1,5 +1,12 @@
 ---
 # =======================================================
+# 0. Initialize Status Tracking
+# =======================================================
+- name: Initialize user status tracking
+  set_fact:
+    user_status: {}
+
+# =======================================================
 # 1. Generate Passwords for Target Users
 # =======================================================
 - name: Generate cleartext passwords for target users
@@ -236,4 +243,19 @@
   loop: "{{ user_pass_map | dict2items }}"
   loop_control:
     loop_var: current_user
-  no_log: true
+
+# =======================================================
+# 8. Print Summary Report
+# =======================================================
+- name: Print execution summary
+  debug:
+    msg: |
+      ============================================
+      PAM360 SYNC SUMMARY - {{ ansible_hostname }}
+      ============================================
+      {% for user, status in user_status.items() %}
+      User: {{ user }}
+        - PAM360: {{ 'CREATED' if status.created_in_pam | default(false) else ('UPDATED' if status.updated_pam | default(false) else ('FAILED' if status.api_failed | default(false) else 'NO CHANGE')) }}
+        - Linux:  {{ 'ROTATED' if status.rotated_linux | default(false) else ('SKIPPED (user missing)' if status.skipped_missing_local | default(false) else 'NO CHANGE') }}
+      {% endfor %}
+      ============================================

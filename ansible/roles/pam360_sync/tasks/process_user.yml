@@ -28,15 +28,21 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"NEWPASSWORD":"{{ current_user.value }}","RESETTYPE":"LOCAL","REASON":"Rotated via Ansible"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
   when: current_account_id | length > 0
   delegate_to: localhost
   become: false
   no_log: true
   register: update_result
 
+- name: Track PAM update status
+  set_fact:
+    user_status: "{{ user_status | combine({current_user.key: user_status.get(current_user.key, {}) | combine({'updated_pam': (update_result.json.operation.result.status | default('') == 'Success'), 'api_failed': (update_result.json.operation.result.status | default('') != 'Success')})}) }}"
+  when: current_account_id | length > 0
+
 - name: Log password update
   debug:
-    msg: "Updated password for '{{ current_user.key }}' in PAM360"
+    msg: "Updated password for '{{ current_user.key }}' in PAM360: {{ update_result.json.operation.result.status | default('Unknown') }}"
   when: current_account_id | length > 0
 
 # -------------------------------------------------------
@@ -51,13 +57,19 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ current_user.key }}","PASSWORD":"{{ current_user.value }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
   when: current_account_id | length == 0
   delegate_to: localhost
   become: false
   no_log: true
   register: create_result
 
+- name: Track PAM create status
+  set_fact:
+    user_status: "{{ user_status | combine({current_user.key: user_status.get(current_user.key, {}) | combine({'created_in_pam': (create_result.json.operation.result.status | default('') == 'Success'), 'api_failed': (create_result.json.operation.result.status | default('') != 'Success')})}) }}"
+  when: current_account_id | length == 0
+
 - name: Log account creation
   debug:
-    msg: "Created account '{{ current_user.key }}' in PAM360"
+    msg: "Created account '{{ current_user.key }}' in PAM360: {{ create_result.json.operation.result.status | default('Unknown') }}"
   when: current_account_id | length == 0
