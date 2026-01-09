@@ -228,10 +228,75 @@ Adjust the `ACCESSTYPE` values in the playbook based on your organization's secu
 
 ## Security Considerations
 
-- Store API tokens securely (use Ansible Vault for production)
-- Use `no_log: true` for tasks handling passwords
+### Basic Usage (Without Vault)
+
+For development/testing, you can set credentials directly in `site.yml`:
+
+```yaml
+vars:
+  pam_url: "https://your-pam360-server:8282"
+  pam_token: "YOUR-API-TOKEN-HERE"
+```
+
+Run normally:
+
+```bash
+ansible-playbook -i inventory site.yml -kK
+```
+
+### Production Usage (With Ansible Vault) - Optional
+
+For production environments, encrypt your API token and other secrets using Ansible Vault:
+
+**1. Create an encrypted vars file:**
+
+```bash
+cd ansible
+ansible-vault create group_vars/all/vault.yml
+```
+
+**2. Add your secrets to the vault file:**
+
+```yaml
+vault_pam_token: "YOUR-API-TOKEN-HERE"
+vault_pam_url: "https://your-pam360-server:8282"
+```
+
+**3. Reference vault variables in `site.yml`:**
+
+```yaml
+vars:
+  pam_url: "{{ vault_pam_url }}"
+  pam_token: "{{ vault_pam_token }}"
+```
+
+**4. Run playbook with vault password:**
+
+```bash
+ansible-playbook -i inventory site.yml -kK --ask-vault-pass
+```
+
+**Or use a password file:**
+
+```bash
+echo "your-vault-password" > ~/.vault_pass
+chmod 600 ~/.vault_pass
+ansible-playbook -i inventory site.yml -kK --vault-password-file ~/.vault_pass
+```
+
+**Edit existing vault:**
+
+```bash
+ansible-vault edit group_vars/all/vault.yml
+```
+
+### Additional Security Best Practices
+
+- Use `no_log: true` for tasks handling passwords (already implemented)
 - Validate SSL certificates in production (`pam_validate_certs: true`)
-- Restrict API token permissions to minimum required
+- Restrict API token permissions to minimum required in PAM360
+- Store vault password file outside of version control
+- Add `*.vault_pass` and `vault.yml` to `.gitignore`
 
 ## License
 

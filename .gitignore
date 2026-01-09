@@ -1,6 +1,11 @@
 # Password records - contains sensitive credentials
 ansible/password_records/
 
+# Ansible Vault password files
+*.vault_pass
+.vault_pass
+ansible/group_vars/all/vault.yml
+
 # Python
 __pycache__/
 *.py[cod]
