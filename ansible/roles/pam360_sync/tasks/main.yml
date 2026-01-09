@@ -526,6 +526,66 @@
   when: associate_response is defined and associate_response.json is defined
 
 # =======================================================
+# 6b. Share Resource Group with User Groups (API 9.10)
+# =======================================================
+- name: Share Resource Group with User Groups (API 9.10)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroup/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"resourceGroupIds":["{{ pam_resource_group_id }}"],"userGroupIds":["{{ item.id }}"],"accessType":"fullaccess"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ pam_share_groups | default([]) }}"
+  register: share_resource_group_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_group_id is defined
+    - pam_share_groups | length > 0
+
+- name: Debug resource group sharing results
+  debug:
+    msg: "Shared resource group '{{ pam_resource_group_name }}' with group '{{ item.item.name }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_resource_group_response.results | default([]) }}"
+  when:
+    - share_resource_group_response is defined
+    - share_resource_group_response.results is defined
+    - item.json is defined
+
+# =======================================================
+# 6c. Share Resource Group with Users (API 9.9)
+# =======================================================
+- name: Share Resource Group with Users (API 9.9)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroup/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"resourceGroupIds":["{{ pam_resource_group_id }}"],"userIds":["{{ item.id }}"],"accessType":"fullaccess"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ pam_share_users | default([]) }}"
+  register: share_resource_group_users_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_group_id is defined
+    - pam_share_users | length > 0
+
+- name: Debug resource group user sharing results
+  debug:
+    msg: "Shared resource group '{{ pam_resource_group_name }}' with user '{{ item.item.name }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_resource_group_users_response.results | default([]) }}"
+  when:
+    - share_resource_group_users_response is defined
+    - share_resource_group_users_response.results is defined
+    - item.json is defined
+
+# =======================================================
 # 7. Update Remote Host Passwords (AFTER PAM360 sync)
 # =======================================================
 - name: Update Remote Linux Users with new passwords
