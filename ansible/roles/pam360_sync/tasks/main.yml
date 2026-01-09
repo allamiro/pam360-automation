@@ -39,7 +39,7 @@
   set_fact:
     pam_resource_id: "{{ item['RESOURCE ID'] }}"
   loop: "{{ all_resources_response.json.operation.Details | default([]) }}"
-  when: item['RESOURCE NAME'] == ansible_facts['hostname']
+  when: item['RESOURCE NAME'] == ansible_facts.hostname
   no_log: true
 
 - name: Debug resource check
@@ -92,7 +92,7 @@
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_facts['hostname'] }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_facts['default_ipv4']['address'] }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_facts.hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_facts.default_ipv4.address }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
   register: create_resource_response
   delegate_to: localhost
   become: false
@@ -106,7 +106,7 @@
 
 - name: Fetch ID of newly created resource (API 1.3)
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_facts['hostname'] }}"
+    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_facts.hostname }}"
     method: GET
     headers:
       AUTHTOKEN: "{{ pam_token }}"
@@ -319,7 +319,7 @@
   debug:
     msg: |
       ============================================
-      PAM360 SYNC SUMMARY - {{ ansible_facts['hostname'] }}
+      PAM360 SYNC SUMMARY - {{ ansible_facts.hostname }}
       ============================================
       {% for user, status in user_status.items() %}
       User: {{ user }}
