@@ -180,6 +180,34 @@ Generated passwords comply with PAM360 **Strong** policy:
 - Contains uppercase and lowercase letters
 - Contains numbers
 
+## PAM360 Sharing Strategy
+
+A practical sharing strategy in PAM360 is to treat sharing as **authorization to use a credential**, not as a distribution mechanism, and to enforce **least privilege + group-based access + fast revocation**.
+
+### Recommended Approach
+
+**1. Prefer User Groups / Resource Groups over per-user sharing**
+
+Model access as: `Team (user group) → Environment/Scope (resource group)`
+
+Use the bulk share resource groups endpoints (API 9.9 / 9.10) as your default, and reserve per-resource/per-account sharing for exceptions. This aligns with PAM360's operational model where sharing is typically done at resource or resource-group level for many systems.
+
+**2. Use least privilege on accessType**
+
+| Access Type | Use Case |
+|-------------|----------|
+| `view` | Auditors/visibility use-cases (read-only) |
+| `modify` | Operators who must use the password and may need to update metadata, but shouldn't re-share widely |
+| `fullaccess` | Credential owners / PAM admins only - implies complete management and the ability to re-share |
+
+### This Toolkit's Default
+
+This toolkit uses:
+- **`fullaccess`** for resource-level sharing (API 9.1)
+- **`modify`** for account-level sharing (API 9.5)
+
+Adjust the `ACCESSTYPE` values in the playbook based on your organization's security requirements.
+
 ## Security Considerations
 
 - Store API tokens securely (use Ansible Vault for production)
