@@ -146,24 +146,6 @@ chmod +x pam360_sync.py
 - `SHARE_USER_ID` - PAM360 user ID to share with
 
 **Note:** The Python script uses only standard library modules (no pip install required).
-
-## PAM360 APIs Used
-
-| API  | Description |
-|-----|-------------|
-| 1.1 | Get all resources |
-| 1.2 | Create resource |
-| 1.3 | Get resource ID by name |
-| 2.1 | Get accounts for resource |
-| 2.2 | Get account details |
-| 2.4 | Create accounts |
-| 3.2 | Update account password |
-| 6.2 | Associate resource to group |
-| 6.4 | Get associated groups |
-| 6.7 | Get all resource groups |
-| 9.1 | Share resource with user |
-| 9.5 | Share account with user |
-
 ## Sample Output
 
 ```text
