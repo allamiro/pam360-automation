@@ -1,10 +1,30 @@
 ---
 # =======================================================
-# 0. Initialize Status Tracking
+# 0. Initialize Status Tracking and System Info
 # =======================================================
 - name: Initialize user status tracking
   set_fact:
     user_status: {}
+
+- name: Get hostname from command
+  command: hostname
+  register: hostname_cmd
+  changed_when: false
+
+- name: Get IP addresses from command
+  command: hostname -I
+  register: ip_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Set system info variables
+  set_fact:
+    system_hostname: "{{ hostname_cmd.stdout | trim }}"
+    system_ip: "{{ (ip_cmd.stdout | trim).split() | first | default('127.0.0.1') }}"
+
+- name: Debug system info
+  debug:
+    msg: "System: {{ system_hostname }} ({{ system_ip }})"
 
 # =======================================================
 # 1. Lookup PAM360 Share User IDs from Usernames (API 4.5)
@@ -73,7 +93,7 @@
   set_fact:
     pam_resource_id: "{{ item['RESOURCE ID'] }}"
   loop: "{{ all_resources_response.json.operation.Details | default([]) }}"
-  when: item['RESOURCE NAME'] == ansible_facts.hostname
+  when: item['RESOURCE NAME'] == system_hostname
   no_log: true
 
 - name: Debug resource check
@@ -126,7 +146,7 @@
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_facts.hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_facts.default_ipv4.address }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ system_hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ system_ip }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
   register: create_resource_response
   delegate_to: localhost
   become: false
@@ -140,7 +160,7 @@
 
 - name: Fetch ID of newly created resource (API 1.3)
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_facts.hostname }}"
+    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ system_hostname }}"
     method: GET
     headers:
       AUTHTOKEN: "{{ pam_token }}"
@@ -392,7 +412,7 @@
 - name: Append password records to CSV
   lineinfile:
     path: "{{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
-    line: '"{{ pam_resource_group_name }}","{{ ansible_facts.hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ ansible_facts.default_ipv4.address }}","Rotated: {{ ansible_facts.date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
+    line: '"{{ pam_resource_group_name }}","{{ system_hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ system_ip }}","Rotated: {{ ansible_facts.date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
     insertafter: EOF
   loop: "{{ user_pass_map | dict2items }}"
   delegate_to: localhost
@@ -439,7 +459,7 @@
   debug:
     msg: |
       ============================================
-      PAM360 SYNC SUMMARY - {{ ansible_facts.hostname }}
+      PAM360 SYNC SUMMARY - {{ system_hostname }}
       ============================================
       Resource ID: {{ pam_resource_id }}
       Resource Group: {{ pam_resource_group_name }} (ID: {{ pam_resource_group_id | default('N/A') }})
