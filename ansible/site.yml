@@ -12,6 +12,7 @@
     pam_target_users:
       - root
       - admin
+      - jdoe
     pam_resource_group_name: "Linux Servers"
     pam_share_user_names: 
       - "admin"
