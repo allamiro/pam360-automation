@@ -313,7 +313,50 @@
     loop_var: current_user
 
 # =======================================================
-# 8. Fetch Final Account List from PAM360 (API 2.1)
+# 8. Generate KeePass-Compatible Password Record
+# =======================================================
+- name: Set timestamp for password file
+  set_fact:
+    password_file_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Create password record directory
+  file:
+    path: "{{ playbook_dir }}/password_records"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Generate KeePass CSV header (once per run)
+  copy:
+    content: |
+      "Group","Title","Username","Password","URL","Notes"
+    dest: "{{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Append password records to CSV
+  lineinfile:
+    path: "{{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
+    line: '"{{ pam_resource_group_name }}","{{ ansible_facts.hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ ansible_facts.default_ipv4.address }}","Rotated: {{ ansible_date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
+    insertafter: EOF
+  loop: "{{ user_pass_map | dict2items }}"
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Display password file location
+  debug:
+    msg: "Password record saved to: {{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
+  run_once: true
+
+# =======================================================
+# 9. Fetch Final Account List from PAM360 (API 2.1)
 # =======================================================
 - name: Get final account list from PAM360 (API 2.1)
   uri:
@@ -341,7 +384,7 @@
   when: final_accounts is defined and final_accounts.json is defined
 
 # =======================================================
-# 9. Print Summary Report
+# 10. Print Summary Report
 # =======================================================
 - name: Print execution summary
   debug:
