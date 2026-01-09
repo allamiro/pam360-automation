@@ -29,6 +29,8 @@ This toolkit automates the rotation of local Linux user passwords and synchroniz
 
 ```text
 pam360-automation/
+├── LICENSE
+├── README.md
 ├── ansible/
 │   ├── inventory              # Target hosts
 │   ├── site.yml               # Main playbook
@@ -40,10 +42,10 @@ pam360-automation/
 │               ├── main.yml           # Main task flow
 │               ├── process_user.yml   # Per-user processing
 │               └── update_passwords.yml # Linux password update
-├── scripts/
-│   ├── pam360_sync.sh         # Standalone bash script
-│   └── pam360_sync.py         # Python script (stdlib only)
-└── README.md
+├── bash/
+│   └── pam360_sync.sh         # Standalone bash script
+└── python/
+    └── pam360_sync.py         # Python script (stdlib only)
 ```
 
 ## Configuration
@@ -80,13 +82,13 @@ ansible-playbook -i inventory site.yml -kK
 **Bash:**
 
 ```bash
-./scripts/pam360_sync.sh
+./bash/pam360_sync.sh
 ```
 
 **Python:**
 
 ```bash
-python3 ./scripts/pam360_sync.py
+python3 ./python/pam360_sync.py
 ```
 
 ## PAM360 APIs Used
