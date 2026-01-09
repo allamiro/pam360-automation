@@ -313,7 +313,22 @@
     loop_var: current_user
 
 # =======================================================
-# 8. Print Summary Report
+# 8. Fetch Final Account List from PAM360 (API 2.1)
+# =======================================================
+- name: Get final account list from PAM360 (API 2.1)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: final_accounts
+  delegate_to: localhost
+  become: false
+  when: pam_resource_id is defined
+
+# =======================================================
+# 9. Print Summary Report
 # =======================================================
 - name: Print execution summary
   debug:
@@ -321,9 +336,16 @@
       ============================================
       PAM360 SYNC SUMMARY - {{ ansible_facts.hostname }}
       ============================================
+      Resource ID: {{ pam_resource_id }}
+      Resource Group: {{ pam_resource_group_name }} (ID: {{ pam_resource_group_id | default('N/A') }})
+      
+      LOCAL STATUS:
       {% for user, status in user_status.items() %}
-      User: {{ user }}
-        - PAM360: {{ 'CREATED' if status.created_in_pam | default(false) else ('UPDATED' if status.updated_pam | default(false) else ('FAILED' if status.api_failed | default(false) else 'NO CHANGE')) }}
-        - Linux:  {{ 'ROTATED' if status.rotated_linux | default(false) else ('SKIPPED (user missing)' if status.skipped_missing_local | default(false) else 'NO CHANGE') }}
+        {{ user }}: PAM360={{ 'CREATED' if status.created_in_pam | default(false) else ('UPDATED' if status.updated_pam | default(false) else ('FAILED' if status.api_failed | default(false) else 'NO CHANGE')) }}, Linux={{ 'ROTATED' if status.rotated_linux | default(false) else ('SKIPPED' if status.skipped_missing_local | default(false) else 'NO CHANGE') }}
+      {% endfor %}
+      
+      PAM360 ACCOUNTS (confirmed from API):
+      {% for acc in final_accounts.json.operation.Details['ACCOUNT LIST'] | default([]) %}
+        - {{ acc['ACCOUNT NAME'] }} (ID: {{ acc['ACCOUNT ID'] }}, Policy: {{ acc['ACCOUNT PASSWORD POLICY'] }})
       {% endfor %}
       ============================================
