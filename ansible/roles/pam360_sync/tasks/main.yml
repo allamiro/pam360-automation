@@ -7,7 +7,35 @@
     user_status: {}
 
 # =======================================================
-# 1. Generate Passwords for Target Users
+# 1. Lookup PAM360 Share User ID from Username (API 4.5)
+# =======================================================
+- name: Get PAM360 user ID from username (API 4.5)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/user/getUserId?USERNAME={{ pam_share_user_name }}"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: share_user_lookup
+  delegate_to: localhost
+  become: false
+  when: pam_share_user_name is defined
+
+- name: Set share user ID from lookup
+  set_fact:
+    pam_share_user_id: "{{ share_user_lookup.json.operation.Details.USERID }}"
+  when:
+    - share_user_lookup is defined
+    - share_user_lookup.json is defined
+    - share_user_lookup.json.operation.result.status == 'Success'
+
+- name: Debug share user lookup
+  debug:
+    msg: "PAM360 share user '{{ pam_share_user_name }}' has ID: {{ pam_share_user_id }}"
+  when: pam_share_user_name is defined
+
+# =======================================================
+# 2. Generate Passwords for Target Users
 # =======================================================
 - name: Generate cleartext passwords for target users
   set_fact:
@@ -16,7 +44,7 @@
   no_log: true
 
 # =======================================================
-# 2. Check Resource Existence (API 1.1)
+# 3. Check Resource Existence (API 1.1)
 # =======================================================
 - name: Fetch all resources from PAM360 to check existence
   uri:

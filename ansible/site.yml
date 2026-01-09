@@ -14,7 +14,7 @@
       - admin
     pam_resource_group_name: "Linux Servers"
     pam_share_user_name: "admin"
-    pam_share_user_id: "1"
+    
 
   roles:
     - pam360_sync
