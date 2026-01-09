@@ -16,6 +16,9 @@
     pam_share_user_names: 
       - "admin"
       - "tsuliman"
+    
+    # Password file options
+    pam_create_password_file: true  # Set to false to disable KeePass CSV generation
 
   roles:
     - pam360_sync

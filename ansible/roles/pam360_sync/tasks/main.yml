@@ -421,13 +421,14 @@
     loop_var: current_user
 
 # =======================================================
-# 8. Generate KeePass-Compatible Password Record
+# 8. Generate KeePass-Compatible Password Record (Optional)
 # =======================================================
 - name: Set timestamp for password file
   set_fact:
     password_file_timestamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
   delegate_to: localhost
   run_once: true
+  when: pam_create_password_file | default(true)
 
 - name: Create password record directory
   file:
@@ -437,6 +438,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: pam_create_password_file | default(true)
 
 - name: Generate KeePass CSV header (once per run)
   copy:
@@ -447,6 +449,7 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: pam_create_password_file | default(true)
 
 - name: Append password records to CSV
   lineinfile:
@@ -457,11 +460,19 @@
   delegate_to: localhost
   become: false
   no_log: true
+  when: pam_create_password_file | default(true)
 
 - name: Display password file location
   debug:
     msg: "Password record saved to: {{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
   run_once: true
+  when: pam_create_password_file | default(true)
+
+- name: Display password file skipped
+  debug:
+    msg: "Password file creation skipped (pam_create_password_file: false)"
+  run_once: true
+  when: not (pam_create_password_file | default(true))
 
 # =======================================================
 # 9. Fetch Final Account List from PAM360 (API 2.1)
