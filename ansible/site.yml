@@ -13,6 +13,7 @@
       - root
       - admin
       - jdoe
+      - trump
     pam_resource_group_name: "Linux Servers"
     pam_share_user_names: 
       - "admin"
