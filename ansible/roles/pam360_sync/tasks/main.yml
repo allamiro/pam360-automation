@@ -46,6 +46,17 @@
   loop: "{{ pam_share_user_names | default([]) }}"
   when: pam_share_user_names is defined
 
+- name: Debug raw user lookup responses
+  debug:
+    msg: |
+      User: {{ item.item }}
+      Status: {{ item.json.operation.result.status | default('N/A') }}
+      Message: {{ item.json.operation.result.message | default('N/A') }}
+      UserID: {{ item.json.operation.Details.USERID | default('NOT FOUND') }}
+      Full Response: {{ item.json | default({}) }}
+  loop: "{{ share_user_lookups.results | default([]) }}"
+  when: share_user_lookups.results is defined
+
 - name: Build share users list with IDs
   set_fact:
     pam_share_users: "{{ pam_share_users + [{'name': item.item, 'id': item.json.operation.Details.USERID}] }}"
@@ -53,12 +64,14 @@
   when:
     - item.json is defined
     - item.json.operation.result.status == 'Success'
-  no_log: true
 
 - name: Debug share users lookup
   debug:
-    msg: "PAM360 share users: {{ pam_share_users | map(attribute='name') | list }} -> IDs: {{ pam_share_users | map(attribute='id') | list }}"
-  when: pam_share_users | length > 0
+    msg: |
+      Share users configured: {{ pam_share_user_names | default([]) }}
+      Share users resolved: {{ pam_share_users | length }} users
+      Names: {{ pam_share_users | map(attribute='name') | list }}
+      IDs: {{ pam_share_users | map(attribute='id') | list }}
 
 # =======================================================
 # 2. Generate Passwords for Target Users
@@ -258,6 +271,15 @@
 # =======================================================
 # 5b. Share Accounts with Users (API 9.5)
 # =======================================================
+- name: Debug sharing prerequisites
+  debug:
+    msg: |
+      === SHARING PREREQUISITES ===
+      Resource ID: {{ pam_resource_id | default('NOT SET') }}
+      Share users count: {{ pam_share_users | length }}
+      Share users: {{ pam_share_users | default([]) }}
+      Will share: {{ 'YES' if (pam_resource_id | default('') | length > 0 and pam_share_users | length > 0) else 'NO - missing prerequisites' }}
+
 - name: Get account IDs for sharing
   uri:
     url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
@@ -269,6 +291,13 @@
   delegate_to: localhost
   become: false
   when: pam_resource_id is defined
+
+- name: Debug accounts for sharing
+  debug:
+    msg: |
+      Accounts available for sharing:
+      {{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) | map(attribute='ACCOUNT NAME') | list }}
+  when: accounts_for_sharing is defined and accounts_for_sharing.json is defined
 
 - name: Build account-user share combinations
   set_fact:
