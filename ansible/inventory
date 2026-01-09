@@ -1,7 +1,11 @@
 [linux_servers]
 10.0.30.110
+10.0.0.34
+10.0.30.100
+10.0.30.101
 
 [linux_servers:vars]
 ansible_user=ansible
 ansible_become=true
 ansible_become_method=sudo
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'

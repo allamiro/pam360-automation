@@ -3,7 +3,7 @@
 
 - name: Sync passwords with PAM360
   hosts: all
-  gather_facts: true
+  gather_facts: false
   become: true
 
   vars:
