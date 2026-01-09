@@ -18,7 +18,7 @@
       - "tsuliman"
     
     # Password file options
-    pam_create_password_file: true  # Set to false to disable KeePass CSV generation
+    pam_create_password_file: false  # Set to false to disable KeePass CSV generation
 
   roles:
     - pam360_sync
