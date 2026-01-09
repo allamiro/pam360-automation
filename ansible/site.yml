@@ -7,15 +7,40 @@
   become: true
 
   vars:
+    # PAM360 Connection
     pam_url: "https://10.0.0.14:8282"
     pam_token: "44F011D4-9D03-4FFB-BB20-C1EA81A471D9"
+    pam_org_name: ""  # Organization display name (required for bulk APIs, leave empty for default org)
+    
+    # Target Linux Users to Rotate
     pam_target_users:
       - root
       - admin
+    
+    # Resource Group Association
     pam_resource_group_name: "Linux Servers"
+    
+    # Sharing Configuration
+    # Share to individual users (names will be resolved to IDs via API 4.5)
     pam_share_user_names: 
       - "admin"
       - "tsuliman"
+    
+    # Share to user groups (names will be resolved to IDs via API 5.1)
+    pam_share_user_group_names: []
+      # - "Linux Admins"
+      # - "Security Team"
+    
+    # Access types: view, modify, fullaccess, revoke
+    pam_share_resource_access_type: "fullaccess"  # For resource-level sharing (API 9.1/9.3)
+    pam_share_account_access_type: "modify"       # For account-level sharing (API 9.5/9.7)
+    
+    # Sharing scope options
+    pam_share_scope: "resource"      # resource | account | resourcegroup
+    pam_share_bulk: false            # Use bulk APIs (9.2/9.4/9.6/9.8) - requires pam_org_name
+    
+    # Share at resource group level (API 9.9/9.10) - shares entire resource group
+    pam_share_resource_group: false  # If true, share the resource group instead of individual resources
 
   roles:
     - pam360_sync

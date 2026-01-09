@@ -69,22 +69,40 @@ pam360-automation/
 
 ## Configuration
 
-Edit `ansible/roles/pam360_sync/defaults/main.yml`:
+Edit `ansible/site.yml` or `ansible/roles/pam360_sync/defaults/main.yml`:
 
 ```yaml
-# PAM360 Server Configuration
+# PAM360 Connection
 pam_url: "https://your-pam360-server:8282"
 pam_token: "YOUR-API-TOKEN-HERE"
-pam_validate_certs: false
+pam_org_name: ""                 # Organization name (for bulk APIs)
 
 # Target Users to Rotate
 pam_target_users:
   - root
   - admin
 
-# Sharing Configuration
-pam_share_user_id: "1"           # PAM360 user ID to share with
+# Resource Group Association
 pam_resource_group_name: "Linux Servers"
+
+# Share to Users (names resolved to IDs via API 4.5)
+pam_share_user_names:
+  - "admin"
+  - "operator1"
+
+# Share to User Groups (names resolved to IDs via API 5.1)
+pam_share_user_group_names:
+  - "Linux Admins"
+  - "Security Team"
+
+# Access Types: view, modify, fullaccess, revoke
+pam_share_resource_access_type: "fullaccess"  # Resource-level (API 9.1/9.3)
+pam_share_account_access_type: "modify"       # Account-level (API 9.5/9.7)
+
+# Advanced Options
+pam_share_scope: "resource"      # resource | account | resourcegroup
+pam_share_bulk: false            # Use bulk APIs (requires pam_org_name)
+pam_share_resource_group: false  # Share entire resource group
 ```
 
 ## Usage

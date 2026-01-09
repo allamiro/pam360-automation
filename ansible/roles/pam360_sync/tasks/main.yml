@@ -41,6 +41,60 @@
   when: pam_share_users | length > 0
 
 # =======================================================
+# 1b. Lookup PAM360 User Group IDs from Names (API 5.1)
+# =======================================================
+- name: Initialize share user groups list
+  set_fact:
+    pam_share_user_groups: []
+
+- name: Get all user groups (API 5.1)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/usergroups"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: all_user_groups
+  delegate_to: localhost
+  become: false
+  when: pam_share_user_group_names is defined and pam_share_user_group_names | length > 0
+
+- name: Build share user groups list with IDs
+  set_fact:
+    pam_share_user_groups: "{{ pam_share_user_groups + [{'name': item.USERGROUPNAME, 'id': item.USERGROUPID}] }}"
+  loop: "{{ all_user_groups.json.operation.Details | default([]) }}"
+  when:
+    - all_user_groups is defined
+    - all_user_groups.json is defined
+    - item.USERGROUPNAME in pam_share_user_group_names
+  no_log: true
+
+- name: Debug share user groups lookup
+  debug:
+    msg: "PAM360 share user groups: {{ pam_share_user_groups | map(attribute='name') | list }} -> IDs: {{ pam_share_user_groups | map(attribute='id') | list }}"
+  when: pam_share_user_groups | length > 0
+
+# =======================================================
+# 1c. Get Organization Info (API 7.1) - for bulk APIs
+# =======================================================
+- name: Get organization details (API 7.1)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/organizations"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: org_details
+  delegate_to: localhost
+  become: false
+  when: pam_org_name is defined and pam_org_name | length > 0
+
+- name: Debug organization lookup
+  debug:
+    msg: "Available organizations: {{ org_details.json.operation.Details | map(attribute='displayName') | list | default([]) }}"
+  when: org_details is defined and org_details.json is defined
+
+# =======================================================
 # 2. Generate Passwords for Target Users
 # =======================================================
 - name: Generate cleartext passwords for target users
@@ -208,7 +262,7 @@
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERID":"{{ item.id }}"}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"{{ pam_share_resource_access_type | default("fullaccess") }}","USERID":"{{ item.id }}"}}}'
   loop: "{{ pam_share_users }}"
   register: share_responses
   delegate_to: localhost
@@ -258,7 +312,7 @@
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"modify","USERID":"{{ item.user_id }}"}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"{{ pam_share_account_access_type | default("modify") }}","USERID":"{{ item.user_id }}"}}}'
     status_code: [200, 201, 400, 401, 403, 404, 500]
   loop: "{{ account_user_shares | default([]) }}"
   register: share_accounts_response
@@ -275,6 +329,74 @@
   when:
     - share_accounts_response is defined
     - share_accounts_response.results is defined
+    - item.json is defined
+
+# =======================================================
+# 5c. Share Resource with User Groups (API 9.3)
+# =======================================================
+- name: Share Resource with User Groups (API 9.3)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"{{ pam_share_resource_access_type | default("fullaccess") }}","USERGROUPID":"{{ item.id }}"}}}'
+  loop: "{{ pam_share_user_groups | default([]) }}"
+  register: share_group_responses
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - pam_share_user_groups | length > 0
+
+- name: Debug user group share results
+  debug:
+    msg: "Shared resource with group '{{ item.item.name }}': {{ item.json.operation.result.message | default('Skipped') }}"
+  loop: "{{ share_group_responses.results | default([]) }}"
+  when:
+    - share_group_responses is defined
+    - item.json is defined
+
+# =======================================================
+# 5d. Share Accounts with User Groups (API 9.7)
+# =======================================================
+- name: Build account-usergroup share combinations
+  set_fact:
+    account_group_shares: "{{ account_group_shares | default([]) + [{'account_id': item.0['ACCOUNT ID'], 'account_name': item.0['ACCOUNT NAME'], 'group_id': item.1.id, 'group_name': item.1.name}] }}"
+  loop: "{{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) | product(pam_share_user_groups | default([])) | list }}"
+  when:
+    - accounts_for_sharing is defined
+    - accounts_for_sharing.json is defined
+    - pam_share_user_groups | length > 0
+  no_log: true
+
+- name: Share each account with each user group (API 9.7)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts/{{ item.account_id }}/share"
+    method: PUT
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"{{ pam_share_account_access_type | default("modify") }}","USERGROUPID":"{{ item.group_id }}"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ account_group_shares | default([]) }}"
+  register: share_accounts_group_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - account_group_shares is defined
+
+- name: Debug account group share results
+  debug:
+    msg: "Shared account '{{ item.item.account_name }}' with group '{{ item.item.group_name }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_accounts_group_response.results | default([]) }}"
+  when:
+    - share_accounts_group_response is defined
+    - share_accounts_group_response.results is defined
     - item.json is defined
 
 # =======================================================
