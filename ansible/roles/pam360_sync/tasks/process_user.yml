@@ -42,7 +42,7 @@
 
 - name: Log password update
   debug:
-    msg: "Updated password for '{{ current_user.key }}' in PAM360: {{ update_result.json.operation.result.status | default('Unknown') }}"
+    msg: "Updated password for '{{ current_user.key }}' in PAM360: {{ update_result.json.operation.result.status | default('Unknown') }} - {{ update_result.json.operation.result.message | default('No message') }}"
   when: current_account_id | length > 0
 
 # -------------------------------------------------------

@@ -11,7 +11,7 @@
 # =======================================================
 - name: Generate cleartext passwords for target users
   set_fact:
-    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: lookup('password', '/dev/null length=14 chars=ascii_letters,digits') }) }}"
+    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: (lookup('password', '/dev/null length=1 chars=ascii_letters') ~ lookup('password', '/dev/null length=10 chars=ascii_letters,digits') ~ lookup('password', '/dev/null length=1 chars=.,!@#$%') ~ lookup('password', '/dev/null length=2 chars=digits')) }) }}"
   loop: "{{ pam_target_users }}"
   no_log: true
 
@@ -39,7 +39,7 @@
   set_fact:
     pam_resource_id: "{{ item['RESOURCE ID'] }}"
   loop: "{{ all_resources_response.json.operation.Details | default([]) }}"
-  when: item['RESOURCE NAME'] == ansible_hostname
+  when: item['RESOURCE NAME'] == ansible_facts['hostname']
   no_log: true
 
 - name: Debug resource check
@@ -92,7 +92,7 @@
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_default_ipv4.address }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_facts['hostname'] }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_facts['default_ipv4']['address'] }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
   register: create_resource_response
   delegate_to: localhost
   become: false
@@ -106,7 +106,7 @@
 
 - name: Fetch ID of newly created resource (API 1.3)
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_hostname }}"
+    url: "{{ pam_url }}/restapi/json/v1/resources/resourcename/{{ ansible_facts['hostname'] }}"
     method: GET
     headers:
       AUTHTOKEN: "{{ pam_token }}"
@@ -186,42 +186,109 @@
   when: share_response is defined
 
 # =======================================================
-# 6. Associate Resource to Resource Group (API 6.2)
+# 5b. Share Accounts with User (API 9.5)
 # =======================================================
-- name: Get Resource Group ID
+- name: Get account IDs for sharing
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/resourcegroups/resourcegroupname/{{ pam_resource_group_name | urlencode }}"
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts"
     method: GET
     headers:
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
-    status_code: [200, 404]
-  register: resource_group_response
+  register: accounts_for_sharing
   delegate_to: localhost
   become: false
   when: pam_resource_id is defined
 
-- name: Set Resource Group ID
-  set_fact:
-    pam_resource_group_id: "{{ resource_group_response.json.operation.Details['RESOURCEGROUPID'] | default('') }}"
-  when: 
-    - resource_group_response is defined
-    - resource_group_response.json is defined
-    - resource_group_response.json.operation.Details is defined
-
-- name: Debug resource group ID
-  debug:
-    msg: "Resource Group '{{ pam_resource_group_name }}' ID: {{ pam_resource_group_id | default('NOT FOUND') }}"
-
-- name: Associate Resource to Resource Group (API 6.2)
+- name: Share each account with user (API 9.5)
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/resourcegroups/{{ pam_resource_group_id }}/resources"
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts/{{ item['ACCOUNT ID'] }}/share"
     method: PUT
     headers:
       AUTHTOKEN: "{{ pam_token }}"
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCEIDS":["{{ pam_resource_id }}"]}}}'
+    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"modify","USERID":"{{ pam_share_user_id }}"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) }}"
+  register: share_accounts_response
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - accounts_for_sharing is defined
+    - accounts_for_sharing.json is defined
+
+- name: Debug account share results
+  debug:
+    msg: "Shared account '{{ item.item['ACCOUNT NAME'] }}': {{ item.json.operation.result.message | default('Unknown') }}"
+  loop: "{{ share_accounts_response.results | default([]) }}"
+  when:
+    - share_accounts_response is defined
+    - share_accounts_response.results is defined
+    - item.json is defined
+
+# =======================================================
+# 6. Associate Resource to Resource Group (API 6.2)
+# =======================================================
+- name: Get all Resource Groups (API 6.7)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroup"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: all_resource_groups
+  delegate_to: localhost
+  become: false
+  when: pam_resource_id is defined
+
+- name: Find Resource Group ID by name
+  set_fact:
+    pam_resource_group_id: "{{ item.resourceGroupId }}"
+  loop: "{{ all_resource_groups.json.operation.Details | default([]) }}"
+  when:
+    - all_resource_groups is defined
+    - all_resource_groups.json is defined
+    - item.resourceGroupName == pam_resource_group_name
+  no_log: true
+
+- name: Debug resource group ID
+  debug:
+    msg: "Resource Group '{{ pam_resource_group_name }}' ID: {{ pam_resource_group_id | default('NOT FOUND') }}"
+
+- name: Check if resource is already in group (API 6.4)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/associatedGroups"
+    method: GET
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+    validate_certs: "{{ pam_validate_certs }}"
+  register: associated_groups
+  delegate_to: localhost
+  become: false
+  when:
+    - pam_resource_id is defined
+    - pam_resource_group_id is defined
+
+- name: Check if already in target group
+  set_fact:
+    already_in_group: "{{ pam_resource_group_id in (associated_groups.json.operation.Details['ASSOCIATED GROUPS'] | default([]) | map(attribute='GROUP ID') | map('string') | list) }}"
+  when: associated_groups is defined and associated_groups.json is defined
+
+- name: Debug current group associations
+  debug:
+    msg: "Resource already in '{{ pam_resource_group_name }}': {{ already_in_group | default(false) }}"
+
+- name: Associate Resource to Resource Group (API 6.2)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/resourcegroup/{{ pam_resource_group_id }}/associateResources"
+    method: POST
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"Details":{"RESOURCEIDS":[{{ pam_resource_id }}]}}}'
   register: associate_response
   delegate_to: localhost
   become: false
@@ -229,6 +296,7 @@
     - pam_resource_id is defined
     - pam_resource_group_id is defined
     - pam_resource_group_id | length > 0
+    - not (already_in_group | default(false))
 
 - name: Debug association result
   debug:
@@ -251,7 +319,7 @@
   debug:
     msg: |
       ============================================
-      PAM360 SYNC SUMMARY - {{ ansible_hostname }}
+      PAM360 SYNC SUMMARY - {{ ansible_facts['hostname'] }}
       ============================================
       {% for user, status in user_status.items() %}
       User: {{ user }}
