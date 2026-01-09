@@ -17,7 +17,10 @@
     pam_resource_group_name: "Linux Servers"
     pam_share_user_names: 
       - "admin"
-      - "tsuliman"
+    
+    # User group sharing (preferred over individual users)
+    pam_share_group_names:
+      - "LINUX ADMINS"
     
     # Password file options
     pam_create_password_file: false  # Set to false to disable KeePass CSV generation
