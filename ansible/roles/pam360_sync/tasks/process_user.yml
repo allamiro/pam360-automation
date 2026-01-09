@@ -25,7 +25,7 @@
     method: PUT
     headers:
       AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "application/x-www-form-urlencoded"
+      Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"NEWPASSWORD":"{{ current_user.value }}","RESETTYPE":"LOCAL","REASON":"Rotated via Ansible"}}}'
   when: current_account_id | length > 0
@@ -48,7 +48,7 @@
     method: POST
     headers:
       AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "application/x-www-form-urlencoded"
+      Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ current_user.key }}","PASSWORD":"{{ current_user.value }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
   when: current_account_id | length == 0

@@ -83,7 +83,7 @@
     method: POST
     headers:
       AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "application/x-www-form-urlencoded"
+      Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ ansible_hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ ansible_default_ipv4.address }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
   register: create_resource_response
@@ -134,7 +134,7 @@
     method: POST
     headers:
       AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "application/x-www-form-urlencoded"
+      Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ item }}","PASSWORD":"{{ user_pass_map[item] }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
   loop: "{{ remaining_users | default([]) }}"
@@ -165,7 +165,7 @@
     method: PUT
     headers:
       AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "application/x-www-form-urlencoded"
+      Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERID":"{{ pam_share_user_id }}"}}}'
   register: share_response
@@ -212,7 +212,7 @@
     method: PUT
     headers:
       AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "application/x-www-form-urlencoded"
+      Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"RESOURCEIDS":["{{ pam_resource_id }}"]}}}'
   register: associate_response
