@@ -19,6 +19,9 @@
     
     # Password file options
     pam_create_password_file: false  # Set to false to disable KeePass CSV generation
+    
+    # Local account options
+    pam_create_local_accounts: true  # Set to true to create local accounts if they don't exist
 
   roles:
     - pam360_sync
