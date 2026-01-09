@@ -292,7 +292,6 @@ ansible-vault edit group_vars/all/vault.yml
 
 ### Additional Security Best Practices
 
-- Use `no_log: true` for tasks handling passwords (already implemented)
 - Validate SSL certificates in production (`pam_validate_certs: true`)
 - Restrict API token permissions to minimum required in PAM360
 - Store vault password file outside of version control
