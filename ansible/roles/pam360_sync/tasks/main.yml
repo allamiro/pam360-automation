@@ -65,7 +65,7 @@
 # =======================================================
 - name: Generate cleartext passwords for target users
   set_fact:
-    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: (lookup('password', '/dev/null length=1 chars=ascii_letters') ~ lookup('password', '/dev/null length=10 chars=ascii_letters,digits') ~ lookup('password', '/dev/null length=1 chars=.,!@#$%') ~ lookup('password', '/dev/null length=2 chars=digits')) }) }}"
+    user_pass_map: "{{ user_pass_map | default({}) | combine({ item: (lookup('password', '/dev/null length=1 chars=ascii_letters') ~ lookup('password', '/dev/null length=10 chars=ascii_letters,digits') ~ lookup('password', '/dev/null length=1 chars=.,!@#$') ~ lookup('password', '/dev/null length=2 chars=digits')) }) }}"
   loop: "{{ pam_target_users }}"
   no_log: true
 
