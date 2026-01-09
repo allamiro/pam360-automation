@@ -89,6 +89,13 @@
     pam_resource_id: ""
     resource_was_created: false
 
+- name: Debug all resources from PAM360
+  debug:
+    msg: |
+      Searching for hostname: '{{ system_hostname }}'
+      Total resources in PAM360: {{ all_resources_response.json.operation.Details | default([]) | length }}
+      Resource names in PAM360: {{ all_resources_response.json.operation.Details | default([]) | map(attribute='RESOURCE NAME') | list }}
+
 - name: Find Resource ID for current hostname
   set_fact:
     pam_resource_id: "{{ item['RESOURCE ID'] }}"
@@ -98,7 +105,10 @@
 
 - name: Debug resource check
   debug:
-    msg: "Resource ID: {{ pam_resource_id if pam_resource_id | length > 0 else 'NOT FOUND - will create' }}"
+    msg: |
+      Hostname: '{{ system_hostname }}'
+      Resource ID: {{ pam_resource_id if pam_resource_id | length > 0 else 'NOT FOUND - will create' }}
+      Match found: {{ 'YES' if pam_resource_id | length > 0 else 'NO' }}
 
 # =======================================================
 # 3. Logic Branch A: Resource Exists - Update Accounts
