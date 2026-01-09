@@ -10,7 +10,7 @@ set -euo pipefail
 # =======================================================
 # 1. Configuration
 # =======================================================
-PAM_TOKEN="${PAM_TOKEN:-YOUR_AUTH_TOKEN_HERE}"
+PAM_TOKEN="${PAM_TOKEN:-44F011D4-9D03-4FFB-BB20-C1EA81A471D9}"
 PAM_URL="${PAM_URL:-https://10.0.0.14:8282}"
 TARGET_USERS=('root' 'admin')
 RESOURCE_GROUP_NAME="Linux Servers"
@@ -18,7 +18,12 @@ SHARE_USER_ID="1"  # User ID (numeric) to share with
 
 # Get system details
 SYSTEM_NAME=$(hostname)
-IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+# Get IP address (Mac compatible)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    IP_ADDRESS=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo "127.0.0.1")
+else
+    IP_ADDRESS=$(hostname -I 2>/dev/null | awk '{print $1}' || ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+fi
 
 # Password storage
 declare -A USER_PASSWORDS
@@ -157,15 +162,18 @@ fi
 # =======================================================
 # 7. Update Local Passwords (AFTER PAM360 sync)
 # =======================================================
-log_info "Updating local passwords..."
-
-for user in "${TARGET_USERS[@]}"; do
-    if id "$user" &>/dev/null; then
-        echo "$user:${USER_PASSWORDS[$user]}" | chpasswd
-        log_info "Changed local password for '$user'"
-    else
-        log_warn "User '$user' does not exist locally, skipping"
-    fi
-done
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    log_warn "Running on Mac - skipping local password changes (PAM360 sync only)"
+else
+    log_info "Updating local passwords..."
+    for user in "${TARGET_USERS[@]}"; do
+        if id "$user" &>/dev/null; then
+            echo "$user:${USER_PASSWORDS[$user]}" | chpasswd
+            log_info "Changed local password for '$user'"
+        else
+            log_warn "User '$user' does not exist locally, skipping"
+        fi
+    done
+fi
 
 log_info "Script execution complete."

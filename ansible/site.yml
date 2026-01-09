@@ -8,7 +8,7 @@
 
   vars:
     pam_url: "https://10.0.0.14:8282"
-    pam_token: ""
+    pam_token: "44F011D4-9D03-4FFB-BB20-C1EA81A471D9"
     pam_target_users:
       - root
       - admin
