@@ -2,6 +2,25 @@
 
 Automated password rotation and synchronization for Linux/RHEL systems with [ManageEngine PAM360](https://www.manageengine.com/privileged-access-management/).
 
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/allamiro/pam360-automation.git
+
+# Navigate to the project
+cd pam360-automation
+
+# For Ansible playbook
+cd ansible
+
+# For Bash script
+cd bash
+
+# For Python script
+cd python
+```
+
 ## Overview
 
 This toolkit automates the rotation of local Linux user passwords and synchronizes them with PAM360 Privileged Access Management. It ensures passwords are securely managed, rotated on schedule, and stored in PAM360 for centralized credential management.
@@ -77,19 +96,56 @@ cd ansible
 ansible-playbook -i inventory site.yml -kK
 ```
 
-### Standalone Scripts
-
-**Bash:**
+### Bash Script
 
 ```bash
-./bash/pam360_sync.sh
+# Navigate to bash directory
+cd bash
+
+# Make executable (first time only)
+chmod +x pam360_sync.sh
+
+# Edit configuration variables in the script
+vim pam360_sync.sh
+
+# Run the script
+./pam360_sync.sh
 ```
 
-**Python:**
+**Configuration variables to edit in `pam360_sync.sh`:**
+
+- `PAM_URL` - PAM360 server URL
+- `PAM_TOKEN` - API authentication token
+- `TARGET_USERS` - Array of users to rotate
+- `RESOURCE_GROUP` - PAM360 resource group name
+- `SHARE_USER_ID` - PAM360 user ID to share with
+
+### Python Script
 
 ```bash
-python3 ./python/pam360_sync.py
+# Navigate to python directory
+cd python
+
+# Edit configuration variables in the script
+vim pam360_sync.py
+
+# Run the script (requires Python 3.6+)
+python3 pam360_sync.py
+
+# Or make executable and run directly
+chmod +x pam360_sync.py
+./pam360_sync.py
 ```
+
+**Configuration variables to edit in `pam360_sync.py`:**
+
+- `PAM_URL` - PAM360 server URL
+- `PAM_TOKEN` - API authentication token
+- `TARGET_USERS` - List of users to rotate
+- `RESOURCE_GROUP_NAME` - PAM360 resource group name
+- `SHARE_USER_ID` - PAM360 user ID to share with
+
+**Note:** The Python script uses only standard library modules (no pip install required).
 
 ## PAM360 APIs Used
 
