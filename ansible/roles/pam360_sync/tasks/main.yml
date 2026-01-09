@@ -74,38 +74,42 @@
       IDs: {{ pam_share_users | map(attribute='id') | list }}
 
 # =======================================================
-# 1b. Lookup PAM360 User Group IDs from Names (API 4.1)
+# 1b. Lookup PAM360 User Group IDs from Names (API 5.1)
 # =======================================================
 - name: Initialize share groups list
   set_fact:
     pam_share_groups: []
 
-- name: Get all PAM360 user groups (API 4.1)
+- name: Get PAM360 user group IDs from names (API 5.1)
   uri:
-    url: "{{ pam_url }}/restapi/json/v1/usergroup"
+    url: "{{ pam_url }}/restapi/json/v1/user/getUserGroupId?USERGROUPNAME={{ item | urlencode }}"
     method: GET
     headers:
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
-  register: all_user_groups
+  register: share_group_lookups
   delegate_to: localhost
   become: false
+  loop: "{{ pam_share_group_names | default([]) }}"
   when: pam_share_group_names is defined and pam_share_group_names | length > 0
 
-- name: Debug all user groups from PAM360
+- name: Debug raw group lookup responses
   debug:
     msg: |
-      User groups in PAM360: {{ all_user_groups.json.operation.Details | default([]) | map(attribute='GROUPNAME') | list }}
-  when: all_user_groups is defined and all_user_groups.json is defined
+      Group: {{ item.item }}
+      Status: {{ item.json.operation.result.status | default('N/A') }}
+      Message: {{ item.json.operation.result.message | default('N/A') }}
+      GroupID: {{ item.json.operation.Details.USERGROUPID | default('NOT FOUND') }}
+  loop: "{{ share_group_lookups.results | default([]) }}"
+  when: share_group_lookups.results is defined
 
 - name: Build share groups list with IDs
   set_fact:
-    pam_share_groups: "{{ pam_share_groups + [{'name': item.GROUPNAME, 'id': item.GROUPID | string}] }}"
-  loop: "{{ all_user_groups.json.operation.Details | default([]) }}"
+    pam_share_groups: "{{ pam_share_groups + [{'name': item.item, 'id': item.json.operation.Details.USERGROUPID | string}] }}"
+  loop: "{{ share_group_lookups.results | default([]) }}"
   when:
-    - all_user_groups is defined
-    - all_user_groups.json is defined
-    - item.GROUPNAME in (pam_share_group_names | default([]))
+    - item.json is defined
+    - item.json.operation.result.status == 'Success'
 
 - name: Debug share groups lookup
   debug:
