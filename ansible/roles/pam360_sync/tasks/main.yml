@@ -317,7 +317,7 @@
 # =======================================================
 - name: Set timestamp for password file
   set_fact:
-    password_file_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    password_file_timestamp: "{{ ansible_facts.date_time.iso8601_basic_short }}"
   delegate_to: localhost
   run_once: true
 
@@ -343,7 +343,7 @@
 - name: Append password records to CSV
   lineinfile:
     path: "{{ playbook_dir }}/password_records/passwords_{{ password_file_timestamp }}.csv"
-    line: '"{{ pam_resource_group_name }}","{{ ansible_facts.hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ ansible_facts.default_ipv4.address }}","Rotated: {{ ansible_date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
+    line: '"{{ pam_resource_group_name }}","{{ ansible_facts.hostname }} - {{ item.key }}","{{ item.key }}","{{ item.value }}","ssh://{{ ansible_facts.default_ipv4.address }}","Rotated: {{ ansible_facts.date_time.iso8601 }} | Resource ID: {{ pam_resource_id }}"'
     insertafter: EOF
   loop: "{{ user_pass_map | dict2items }}"
   delegate_to: localhost
