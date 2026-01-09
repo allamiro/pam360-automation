@@ -1,0 +1,10 @@
+[Unit]
+Description=Run PAM360 password sync on schedule
+
+[Timer]
+OnCalendar={{ sync_schedule }}
+RandomizedDelaySec={{ sync_random_delay }}
+Persistent=true
+
+[Install]
+WantedBy=timers.target

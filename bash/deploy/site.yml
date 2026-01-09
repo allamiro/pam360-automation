@@ -1,0 +1,166 @@
+---
+# PAM360 Sync Service Deployment Playbook
+# Deploys the bash script as a systemd oneshot service with timer
+
+- name: Deploy PAM360 Sync Service
+  hosts: all
+  gather_facts: true
+  become: true
+
+  vars:
+    # PAM360 Configuration (required)
+    pam_url: "https://10.0.0.14:8282"
+    pam_token: "REPLACE_WITH_YOUR_TOKEN"
+    
+    # Optional overrides
+    resource_group_name: "Linux Servers"
+    share_user_id: "1"
+    target_users:
+      - root
+      - admin
+    
+    # Timer schedule (default: daily with 30min random delay)
+    sync_schedule: "daily"
+    sync_random_delay: "30m"
+    
+    # Installation paths
+    script_path: "/usr/local/sbin/pam360-sync"
+    env_file_path: "/etc/pam360-sync.env"
+    service_name: "pam360-sync"
+
+  tasks:
+    # =======================================================
+    # 1. Install Dependencies
+    # =======================================================
+    - name: Install required packages (RHEL/CentOS/Fedora)
+      dnf:
+        name:
+          - jq
+          - curl
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install required packages (Debian/Ubuntu)
+      apt:
+        name:
+          - jq
+          - curl
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    # =======================================================
+    # 2. Deploy Script
+    # =======================================================
+    - name: Copy PAM360 sync script to target
+      copy:
+        src: "{{ playbook_dir }}/../pam360_sync.sh"
+        dest: "{{ script_path }}"
+        owner: root
+        group: root
+        mode: '0750'
+      notify: Restart pam360-sync timer
+
+    # =======================================================
+    # 3. Create Environment File (Credentials)
+    # =======================================================
+    - name: Create PAM360 environment file
+      template:
+        src: pam360-sync.env.j2
+        dest: "{{ env_file_path }}"
+        owner: root
+        group: root
+        mode: '0600'
+      no_log: true
+      notify: Restart pam360-sync timer
+
+    # =======================================================
+    # 4. Create Systemd Service
+    # =======================================================
+    - name: Create systemd service unit
+      template:
+        src: pam360-sync.service.j2
+        dest: "/etc/systemd/system/{{ service_name }}.service"
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Restart pam360-sync timer
+
+    # =======================================================
+    # 5. Create Systemd Timer
+    # =======================================================
+    - name: Create systemd timer unit
+      template:
+        src: pam360-sync.timer.j2
+        dest: "/etc/systemd/system/{{ service_name }}.timer"
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - Reload systemd
+        - Enable pam360-sync timer
+
+    # =======================================================
+    # 6. Enable and Start Timer
+    # =======================================================
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start pam360-sync timer
+      systemd:
+        name: "{{ service_name }}.timer"
+        enabled: yes
+        state: started
+
+    # =======================================================
+    # 7. Verification
+    # =======================================================
+    - name: Verify timer is active
+      command: systemctl is-active {{ service_name }}.timer
+      register: timer_status
+      changed_when: false
+      failed_when: timer_status.rc != 0
+
+    - name: Get next scheduled run
+      command: systemctl list-timers {{ service_name }}.timer --no-pager
+      register: timer_schedule
+      changed_when: false
+
+    - name: Display deployment summary
+      debug:
+        msg: |
+          ============================================
+          PAM360 SYNC SERVICE DEPLOYED
+          ============================================
+          Host: {{ ansible_facts.hostname }}
+          Script: {{ script_path }}
+          Env File: {{ env_file_path }}
+          Schedule: {{ sync_schedule }} (random delay: {{ sync_random_delay }})
+          Timer Status: {{ timer_status.stdout }}
+          
+          Next scheduled run:
+          {{ timer_schedule.stdout_lines | join('\n') }}
+          
+          Manual test: sudo systemctl start {{ service_name }}.service
+          View logs: sudo journalctl -u {{ service_name }}.service -n 100
+          ============================================
+
+  handlers:
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    - name: Restart pam360-sync timer
+      systemd:
+        name: "{{ service_name }}.timer"
+        state: restarted
+      when: timer_status is defined
+
+    - name: Enable pam360-sync timer
+      systemd:
+        name: "{{ service_name }}.timer"
+        enabled: yes
+        state: started

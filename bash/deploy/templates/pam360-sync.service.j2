@@ -1,0 +1,34 @@
+[Unit]
+Description=PAM360 password sync (rotate local + update PAM360)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+
+EnvironmentFile={{ env_file_path }}
+ExecStart={{ script_path }}
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+
+# Basic hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictSUIDSGID=false
+
+# Required for password rotation (chpasswd, /etc/shadow)
+ReadWritePaths=/etc /var /run
+
+# Timeout to avoid hung curl calls
+TimeoutStartSec=300

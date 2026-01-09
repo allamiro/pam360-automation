@@ -1,0 +1,9 @@
+[linux_servers]
+# Add your target Linux servers here
+# Example:
+# 10.0.30.110 ansible_user=admin
+# server1.example.com
+# server2.example.com
+
+[linux_servers:vars]
+ansible_python_interpreter=/usr/bin/python3
