@@ -41,6 +41,9 @@
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
   register: share_group_lookups
+  retries: 3
+  delay: 2
+  until: share_group_lookups.status in [200, 404] or share_group_lookups.json.operation.result.status is defined
   delegate_to: localhost
   become: false
   loop: "{{ pam_share_group_names | default([]) }}"
@@ -93,6 +96,10 @@
     validate_certs: "{{ pam_validate_certs }}"
     return_content: yes
   register: all_resources_response
+  retries: 3
+  delay: 2
+  until: all_resources_response.status == 200
+  failed_when: all_resources_response.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
 
@@ -135,6 +142,10 @@
           AUTHTOKEN: "{{ pam_token }}"
         validate_certs: "{{ pam_validate_certs }}"
       register: existing_accounts_response
+      retries: 3
+      delay: 2
+      until: existing_accounts_response.status == 200
+      failed_when: existing_accounts_response.json.operation.result.status | default('') == 'Failed'
       delegate_to: localhost
       become: false
 
@@ -170,6 +181,10 @@
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"RESOURCENAME":"{{ system_hostname }}","ACCOUNTNAME":"{{ first_user }}","RESOURCETYPE":"Linux","PASSWORD":"{{ first_pass }}","DNSNAME":"{{ system_ip }}","RESOURCEPASSWORDPOLICY":"Strong","ACCOUNTPASSWORDPOLICY":"Strong","RESOURCEGROUPNAME":"{{ pam_resource_group_name }}"}}}'
   register: create_resource_response
+  retries: 3
+  delay: 2
+  until: create_resource_response.status in [200, 201]
+  failed_when: create_resource_response.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   no_log: true
@@ -188,6 +203,10 @@
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
   register: new_resource_data
+  retries: 3
+  delay: 2
+  until: new_resource_data.status == 200
+  failed_when: new_resource_data.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when: pam_resource_id | length == 0
@@ -221,6 +240,10 @@
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ item }}","PASSWORD":"{{ user_pass_map[item] }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
   loop: "{{ remaining_users | default([]) }}"
+  retries: 3
+  delay: 2
+  until: create_accounts_result.status in [200, 201]
+  failed_when: create_accounts_result.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   no_log: true
@@ -259,6 +282,10 @@
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
   register: accounts_for_sharing
+  retries: 3
+  delay: 2
+  until: accounts_for_sharing.status == 200
+  failed_when: accounts_for_sharing.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when: pam_resource_id is defined
@@ -280,6 +307,10 @@
     body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERGROUPID":"{{ item.id }}"}}}'
   loop: "{{ pam_share_groups | default([]) }}"
   register: share_group_responses
+  retries: 3
+  delay: 2
+  until: share_group_responses.status in [200, 201] or share_group_responses.json.operation.result.status is defined
+  failed_when: share_group_responses.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when:
@@ -316,9 +347,12 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"modify","USERGROUPID":"{{ item.group_id }}"}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
   loop: "{{ account_group_shares | default([]) }}"
   register: share_accounts_group_response
+  retries: 3
+  delay: 2
+  until: share_accounts_group_response.status in [200, 201] or share_accounts_group_response.json.operation.result.status is defined
+  failed_when: share_accounts_group_response.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when:
@@ -345,6 +379,10 @@
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
   register: all_resource_groups
+  retries: 3
+  delay: 2
+  until: all_resource_groups.status == 200
+  failed_when: all_resource_groups.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when: pam_resource_id is defined
@@ -371,6 +409,10 @@
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
   register: associated_groups
+  retries: 3
+  delay: 2
+  until: associated_groups.status == 200
+  failed_when: associated_groups.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when:
@@ -396,6 +438,10 @@
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"RESOURCEIDS":[{{ pam_resource_id }}]}}}'
   register: associate_response
+  retries: 3
+  delay: 2
+  until: associate_response.status in [200, 201]
+  failed_when: associate_response.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when:
@@ -421,9 +467,12 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"resourceGroupIds":["{{ pam_resource_group_id }}"],"userGroupIds":["{{ item.id }}"],"accessType":"fullaccess"}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
   loop: "{{ pam_share_groups | default([]) }}"
   register: share_resource_group_response
+  retries: 3
+  delay: 2
+  until: share_resource_group_response.status in [200, 201] or share_resource_group_response.json.operation.result.status is defined
+  failed_when: share_resource_group_response.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when:
@@ -518,9 +567,11 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"details":{"password":"{{ item.value }}","passwordPolicy":"{{ pam_password_policy | default(''Strong'') }}"}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
   loop: "{{ user_pass_map | dict2items }}"
   register: password_validations
+  retries: 3
+  delay: 2
+  until: password_validations.status in [200, 201] or password_validations.json.operation.result.status is defined
   delegate_to: localhost
   become: false
   no_log: true
@@ -551,6 +602,10 @@
       AUTHTOKEN: "{{ pam_token }}"
     validate_certs: "{{ pam_validate_certs }}"
   register: final_accounts
+  retries: 3
+  delay: 2
+  until: final_accounts.status == 200
+  failed_when: final_accounts.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when: pam_resource_id is defined
@@ -564,6 +619,10 @@
     validate_certs: "{{ pam_validate_certs }}"
   loop: "{{ final_accounts.json.operation.Details['ACCOUNT LIST'] | default([]) }}"
   register: account_details
+  retries: 3
+  delay: 2
+  until: account_details.status == 200
+  failed_when: account_details.json.operation.result.status | default('') == 'Failed'
   delegate_to: localhost
   become: false
   when: final_accounts is defined and final_accounts.json is defined

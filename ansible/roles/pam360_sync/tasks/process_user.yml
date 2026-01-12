@@ -28,12 +28,15 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"NEWPASSWORD":"{{ current_user.value }}","RESETTYPE":"LOCAL","REASON":"Rotated via Ansible"}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
+  register: update_result
+  retries: 3
+  delay: 2
+  until: update_result.status in [200, 201] or update_result.json.operation.result.status is defined
+  failed_when: update_result.json.operation.result.status | default('') == 'Failed'
   when: current_account_id | length > 0
   delegate_to: localhost
   become: false
   no_log: true
-  register: update_result
 
 - name: Track PAM update status
   set_fact:
@@ -57,12 +60,15 @@
       Content-Type: "text/json"
     validate_certs: "{{ pam_validate_certs }}"
     body: 'INPUT_DATA={"operation":{"Details":{"ACCOUNTLIST":[{"ACCOUNTNAME":"{{ current_user.key }}","PASSWORD":"{{ current_user.value }}","ACCOUNTPASSWORDPOLICY":"Strong"}]}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
+  register: create_result
+  retries: 3
+  delay: 2
+  until: create_result.status in [200, 201] or create_result.json.operation.result.status is defined
+  failed_when: create_result.json.operation.result.status | default('') == 'Failed'
   when: current_account_id | length == 0
   delegate_to: localhost
   become: false
   no_log: true
-  register: create_result
 
 - name: Track PAM create status
   set_fact:
