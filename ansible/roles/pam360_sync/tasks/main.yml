@@ -636,6 +636,7 @@
   register: ssh_users_cmd
   changed_when: false
   failed_when: false
+  when: pam_create_ssh_report | default(true)
 
 - name: Get system users with login shells (UID < 1000)
   shell: |
@@ -643,6 +644,7 @@
   register: ssh_system_users_cmd
   changed_when: false
   failed_when: false
+  when: pam_create_ssh_report | default(true)
 
 - name: Get root account info
   shell: |
@@ -650,20 +652,25 @@
   register: root_user_cmd
   changed_when: false
   failed_when: false
+  when: pam_create_ssh_report | default(true)
 
 - name: Build discovered SSH accounts list
   set_fact:
     discovered_ssh_accounts: "{{ (root_user_cmd.stdout_lines | default([])) + (ssh_users_cmd.stdout_lines | default([])) + (ssh_system_users_cmd.stdout_lines | default([])) }}"
+  when: pam_create_ssh_report | default(true)
 
 - name: Parse discovered accounts into structured data
   set_fact:
     discovered_accounts_parsed: "{{ discovered_accounts_parsed | default([]) + [{'username': item.split(':')[0], 'uid': item.split(':')[1], 'home': item.split(':')[2], 'shell': item.split(':')[3]}] }}"
-  loop: "{{ discovered_ssh_accounts }}"
-  when: item | length > 0
+  loop: "{{ discovered_ssh_accounts | default([]) }}"
+  when:
+    - pam_create_ssh_report | default(true)
+    - item | length > 0
 
 - name: Identify accounts NOT in pam_target_users
   set_fact:
     unmanaged_ssh_accounts: "{{ discovered_accounts_parsed | default([]) | rejectattr('username', 'in', pam_target_users) | list }}"
+  when: pam_create_ssh_report | default(true)
 
 - name: Debug discovered SSH accounts
   debug:
@@ -672,6 +679,12 @@
       Total SSH accounts: {{ discovered_accounts_parsed | default([]) | length }}
       Managed by PAM360: {{ pam_target_users | length }}
       Unmanaged accounts: {{ unmanaged_ssh_accounts | default([]) | length }}
+  when: pam_create_ssh_report | default(true)
+
+- name: Debug SSH report skipped
+  debug:
+    msg: "SSH account discovery skipped (pam_create_ssh_report: false)"
+  when: not (pam_create_ssh_report | default(true))
 
 - name: Create SSH accounts report directory
   file:
@@ -681,11 +694,13 @@
   delegate_to: localhost
   become: false
   run_once: true
+  when: pam_create_ssh_report | default(true)
 
 - name: Set report timestamp
   set_fact:
     report_date: "{{ lookup('pipe', 'date +%Y%m%d') }}"
     report_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+  when: pam_create_ssh_report | default(true)
 
 - name: Generate SSH accounts report file for this host
   copy:
@@ -714,10 +729,12 @@
     mode: '0600'
   delegate_to: localhost
   become: false
+  when: pam_create_ssh_report | default(true)
 
 - name: Display SSH accounts report location
   debug:
     msg: "SSH accounts report saved to: {{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_{{ report_date }}_ssh_accounts.txt"
+  when: pam_create_ssh_report | default(true)
 
 # =======================================================
 # 12. Print Summary Report

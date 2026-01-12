@@ -31,6 +31,9 @@
     
     # Local account options
     pam_create_local_accounts: true  # Set to true to create local accounts if they don't exist
+    
+    # SSH account discovery options
+    pam_create_ssh_report: true  # Set to false to disable SSH account discovery and reporting
 
   roles:
     - pam360_sync
