@@ -1,0 +1,22 @@
+# SSH-Capable Accounts Report
+# Host: cf-tunnel.local.domain (10.0.0.34)
+# Generated: 2026-01-12T19:23:37Z
+# ============================================================
+
+## ALL SSH-CAPABLE ACCOUNTS
+root:0:/root:/bin/bash [MANAGED]
+tsuliman:1000:/home/tsuliman:/bin/bash [UNMANAGED]
+ansible:1001:/home/ansible:/bin/bash [UNMANAGED]
+admin:1002:/home/admin:/bin/bash [MANAGED]
+jdoe:1003:/home/jdoe:/bin/bash [MANAGED]
+trump:1004:/home/trump:/bin/bash [MANAGED]
+
+## UNMANAGED ACCOUNTS (add to pam_target_users if needed)
+tsuliman
+ansible
+
+## CURRENTLY MANAGED ACCOUNTS
+root
+admin
+jdoe
+trump

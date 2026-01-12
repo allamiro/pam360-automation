@@ -682,12 +682,17 @@
   become: false
   run_once: true
 
+- name: Set report timestamp
+  set_fact:
+    report_date: "{{ lookup('pipe', 'date +%Y%m%d') }}"
+    report_timestamp: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+
 - name: Generate SSH accounts report file for this host
   copy:
     content: |
       # SSH-Capable Accounts Report
       # Host: {{ system_hostname }} ({{ system_ip }})
-      # Generated: {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+      # Generated: {{ report_timestamp }}
       # ============================================================
       
       ## ALL SSH-CAPABLE ACCOUNTS
@@ -705,14 +710,14 @@
       {% for user in pam_target_users %}
       {{ user }}
       {% endfor %}
-    dest: "{{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_ssh_accounts.txt"
+    dest: "{{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_{{ report_date }}_ssh_accounts.txt"
     mode: '0600'
   delegate_to: localhost
   become: false
 
 - name: Display SSH accounts report location
   debug:
-    msg: "SSH accounts report saved to: {{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_ssh_accounts.txt"
+    msg: "SSH accounts report saved to: {{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_{{ report_date }}_ssh_accounts.txt"
 
 # =======================================================
 # 12. Print Summary Report
@@ -789,5 +794,5 @@
       ║ None - all SSH accounts are managed
       {% endif %}
       ╠══════════════════════════════════════════════════════════════════════════════╣
-      ║ Report saved to: ssh_accounts_reports/{{ system_hostname }}_ssh_accounts.txt
+      ║ Report saved to: ssh_accounts_reports/{{ system_hostname }}_{{ report_date }}_ssh_accounts.txt
       ╚══════════════════════════════════════════════════════════════════════════════╝
