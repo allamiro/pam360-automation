@@ -628,7 +628,94 @@
   when: final_accounts is defined and final_accounts.json is defined
 
 # =======================================================
-# 11. Print Summary Report
+# 11. Discover SSH-Capable Accounts on Remote System
+# =======================================================
+- name: Get all users with login shells from /etc/passwd
+  shell: |
+    awk -F: '$7 ~ /(bash|sh|zsh|fish|ksh|csh|tcsh)$/ && $3 >= 1000 {print $1":"$3":"$6":"$7}' /etc/passwd
+  register: ssh_users_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Get system users with login shells (UID < 1000)
+  shell: |
+    awk -F: '$7 ~ /(bash|sh|zsh|ksh|csh|tcsh)$/ && $3 < 1000 && $1 != "root" {print $1":"$3":"$6":"$7}' /etc/passwd
+  register: ssh_system_users_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Get root account info
+  shell: |
+    awk -F: '$1 == "root" {print $1":"$3":"$6":"$7}' /etc/passwd
+  register: root_user_cmd
+  changed_when: false
+  failed_when: false
+
+- name: Build discovered SSH accounts list
+  set_fact:
+    discovered_ssh_accounts: "{{ (root_user_cmd.stdout_lines | default([])) + (ssh_users_cmd.stdout_lines | default([])) + (ssh_system_users_cmd.stdout_lines | default([])) }}"
+
+- name: Parse discovered accounts into structured data
+  set_fact:
+    discovered_accounts_parsed: "{{ discovered_accounts_parsed | default([]) + [{'username': item.split(':')[0], 'uid': item.split(':')[1], 'home': item.split(':')[2], 'shell': item.split(':')[3]}] }}"
+  loop: "{{ discovered_ssh_accounts }}"
+  when: item | length > 0
+
+- name: Identify accounts NOT in pam_target_users
+  set_fact:
+    unmanaged_ssh_accounts: "{{ discovered_accounts_parsed | default([]) | rejectattr('username', 'in', pam_target_users) | list }}"
+
+- name: Debug discovered SSH accounts
+  debug:
+    msg: |
+      === SSH-CAPABLE ACCOUNTS DISCOVERED ===
+      Total SSH accounts: {{ discovered_accounts_parsed | default([]) | length }}
+      Managed by PAM360: {{ pam_target_users | length }}
+      Unmanaged accounts: {{ unmanaged_ssh_accounts | default([]) | length }}
+
+- name: Create SSH accounts report directory
+  file:
+    path: "{{ playbook_dir }}/ssh_accounts_reports"
+    state: directory
+    mode: '0700'
+  delegate_to: localhost
+  become: false
+  run_once: true
+
+- name: Generate SSH accounts report file for this host
+  copy:
+    content: |
+      # SSH-Capable Accounts Report
+      # Host: {{ system_hostname }} ({{ system_ip }})
+      # Generated: {{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}
+      # ============================================================
+      
+      ## ALL SSH-CAPABLE ACCOUNTS
+      {% for acc in discovered_accounts_parsed | default([]) %}
+      {{ acc.username }}:{{ acc.uid }}:{{ acc.home }}:{{ acc.shell }}{% if acc.username in pam_target_users %} [MANAGED]{% else %} [UNMANAGED]{% endif %}
+      
+      {% endfor %}
+      
+      ## UNMANAGED ACCOUNTS (add to pam_target_users if needed)
+      {% for acc in unmanaged_ssh_accounts | default([]) %}
+      {{ acc.username }}
+      {% endfor %}
+      
+      ## CURRENTLY MANAGED ACCOUNTS
+      {% for user in pam_target_users %}
+      {{ user }}
+      {% endfor %}
+    dest: "{{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_ssh_accounts.txt"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+
+- name: Display SSH accounts report location
+  debug:
+    msg: "SSH accounts report saved to: {{ playbook_dir }}/ssh_accounts_reports/{{ system_hostname }}_ssh_accounts.txt"
+
+# =======================================================
+# 12. Print Summary Report
 # =======================================================
 - name: Print execution summary
   debug:
@@ -678,4 +765,29 @@
       ╠══════════════════════════════════════════════════════════════════════════════╣
       ║ Shared with Groups: {{ pam_share_groups | map(attribute='name') | list | join(', ') | default('None') }}
       ║ Group IDs:          {{ pam_share_groups | map(attribute='id') | list | join(', ') | default('None') }}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ SSH-CAPABLE ACCOUNTS DISCOVERED                                               
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ USERNAME        │ UID    │ SHELL              │ STATUS                        
+      ╠─────────────────┼────────┼────────────────────┼───────────────────────────────╣
+      {% for acc in discovered_accounts_parsed | default([]) %}
+      ║ {{ "%-15s" | format(acc.username) }} │ {{ "%-6s" | format(acc.uid) }} │ {{ "%-18s" | format(acc.shell | basename) }} │ {{ 'MANAGED' if acc.username in pam_target_users else 'UNMANAGED' }}
+      {% endfor %}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ SSH DISCOVERY SUMMARY                                                         
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ Total SSH accounts:     {{ discovered_accounts_parsed | default([]) | length }}
+      ║ Managed by PAM360:      {{ discovered_accounts_parsed | default([]) | selectattr('username', 'in', pam_target_users) | list | length }}
+      ║ Unmanaged (action req): {{ unmanaged_ssh_accounts | default([]) | length }}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ UNMANAGED ACCOUNTS (add to pam_target_users)                                  
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      {% for acc in unmanaged_ssh_accounts | default([]) %}
+      ║ {{ acc.username }} (UID: {{ acc.uid }}, Shell: {{ acc.shell | basename }})
+      {% endfor %}
+      {% if unmanaged_ssh_accounts | default([]) | length == 0 %}
+      ║ None - all SSH accounts are managed
+      {% endif %}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ Report saved to: ssh_accounts_reports/{{ system_hostname }}_ssh_accounts.txt
       ╚══════════════════════════════════════════════════════════════════════════════╝
