@@ -503,7 +503,45 @@
   when: not (pam_create_password_file | default(true))
 
 # =======================================================
-# 9. Fetch Final Account List from PAM360 (API 2.1)
+# 9. Validate Passwords with PAM360 (API 3.5)
+# =======================================================
+- name: Initialize password validation results
+  set_fact:
+    password_validation_results: []
+
+- name: Validate passwords with PAM360 (API 3.5)
+  uri:
+    url: "{{ pam_url }}/restapi/json/v1/passwords/validate"
+    method: POST
+    headers:
+      AUTHTOKEN: "{{ pam_token }}"
+      Content-Type: "text/json"
+    validate_certs: "{{ pam_validate_certs }}"
+    body: 'INPUT_DATA={"operation":{"details":{"password":"{{ item.value }}","passwordPolicy":"{{ pam_password_policy | default(''Strong'') }}"}}}'
+    status_code: [200, 201, 400, 401, 403, 404, 500]
+  loop: "{{ user_pass_map | dict2items }}"
+  register: password_validations
+  delegate_to: localhost
+  become: false
+  no_log: true
+
+- name: Build password validation results
+  set_fact:
+    password_validation_results: "{{ password_validation_results + [{'username': item.item.key, 'valid': (item.json.operation.result.message | default('') == 'Valid'), 'status': item.json.operation.result.status | default('Unknown'), 'message': item.json.operation.result.message | default('Unknown')}] }}"
+  loop: "{{ password_validations.results | default([]) }}"
+  when: item.json is defined
+  no_log: true
+
+- name: Debug password validation summary
+  debug:
+    msg: |
+      === PASSWORD VALIDATION RESULTS ===
+      Total validated: {{ password_validation_results | length }}
+      Valid: {{ password_validation_results | selectattr('valid', 'equalto', true) | list | length }}
+      Invalid: {{ password_validation_results | selectattr('valid', 'equalto', false) | list | length }}
+
+# =======================================================
+# 10. Fetch Final Account List from PAM360 (API 2.1)
 # =======================================================
 - name: Get final account list from PAM360 (API 2.1)
   uri:
@@ -531,33 +569,54 @@
   when: final_accounts is defined and final_accounts.json is defined
 
 # =======================================================
-# 10. Print Summary Report
+# 11. Print Summary Report
 # =======================================================
 - name: Print execution summary
   debug:
     msg: |
-      ============================================
-      PAM360 SYNC SUMMARY - {{ system_hostname }}
-      ============================================
-      Resource ID: {{ pam_resource_id }}
-      Resource Group: {{ pam_resource_group_name }} (ID: {{ pam_resource_group_id | default('N/A') }})
-      
-      LOCAL STATUS:
-      {% for user, status in user_status.items() %}
-        {{ user }}: PAM360={{ 'CREATED' if status.created_in_pam | default(false) else ('UPDATED' if status.updated_pam | default(false) else ('FAILED' if status.api_failed | default(false) else 'NO CHANGE')) }}, Linux={{ 'ROTATED' if status.rotated_linux | default(false) else ('SKIPPED' if status.skipped_missing_local | default(false) else 'NO CHANGE') }}
-      {% endfor %}
-      
-      PAM360 ACCOUNTS (confirmed from API 2.1 & 2.2):
+      ╔══════════════════════════════════════════════════════════════════════════════╗
+      ║                    PAM360 SYNC SUMMARY - {{ system_hostname }}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ RESOURCE INFO                                                                 
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ Resource ID:    {{ pam_resource_id }}
+      ║ Resource Group: {{ pam_resource_group_name }} (ID: {{ pam_resource_group_id | default('N/A') }})
+      ║ Host IP:        {{ system_ip }}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ ACCOUNT STATUS TABLE                                                          
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ USERNAME        │ ACCOUNT ID      │ PAM360 STATUS  │ LINUX STATUS │ POLICY   
+      ╠─────────────────┼─────────────────┼────────────────┼──────────────┼──────────╣
       {% for acc in final_accounts.json.operation.Details['ACCOUNT LIST'] | default([]) %}
-        - {{ acc['ACCOUNT NAME'] }} (ID: {{ acc['ACCOUNT ID'] }}, Policy: {{ acc['ACCOUNT PASSWORD POLICY'] }})
+      ║ {{ "%-15s" | format(acc['ACCOUNT NAME']) }} │ {{ "%-15s" | format(acc['ACCOUNT ID']) }} │ {{ "%-14s" | format('CREATED' if user_status[acc['ACCOUNT NAME']].created_in_pam | default(false) else ('UPDATED' if user_status[acc['ACCOUNT NAME']].updated_pam | default(false) else ('FAILED' if user_status[acc['ACCOUNT NAME']].api_failed | default(false) else 'SYNCED'))) }} │ {{ "%-12s" | format('ROTATED' if user_status[acc['ACCOUNT NAME']].rotated_linux | default(false) else ('SKIPPED' if user_status[acc['ACCOUNT NAME']].skipped_missing_local | default(false) else 'OK')) }} │ {{ acc['ACCOUNT PASSWORD POLICY'] | default('N/A') }}
       {% endfor %}
-      
-      ACCOUNT DETAILS:
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ PASSWORD VALIDATION TABLE (API 3.5)                                           
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ USERNAME        │ VALIDATION      │ STATUS         │ MESSAGE                  
+      ╠─────────────────┼─────────────────┼────────────────┼──────────────────────────╣
+      {% for val in password_validation_results | default([]) %}
+      ║ {{ "%-15s" | format(val.username) }} │ {{ "%-15s" | format('VALID' if val.valid else 'INVALID') }} │ {{ "%-14s" | format(val.status) }} │ {{ val.message }}
+      {% endfor %}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ VALIDATION SUMMARY                                                            
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ Total Passwords:  {{ password_validation_results | length }}
+      ║ Valid:            {{ password_validation_results | selectattr('valid', 'equalto', true) | list | length }}
+      ║ Invalid:          {{ password_validation_results | selectattr('valid', 'equalto', false) | list | length }}
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ ACCOUNT DETAILS (for Audit Trail Correlation)                                 
+      ╠══════════════════════════════════════════════════════════════════════════════╣
       {% for result in account_details.results | default([]) %}
       {% if result.json is defined and result.json.operation is defined %}
-        {{ result.item['ACCOUNT NAME'] }}:
-          Last Modified: {{ result.json.operation.Details['LAST MODIFIED TIME'] | default('N/A') }}
-          Last Accessed: {{ result.json.operation.Details['LAST ACCESSED TIME'] | default('N/A') }}
+      ║ {{ result.item['ACCOUNT NAME'] }} (ID: {{ result.item['ACCOUNT ID'] }}):
+      ║   Last Modified: {{ result.json.operation.Details['LAST MODIFIED TIME'] | default('N/A') }}
+      ║   Last Accessed: {{ result.json.operation.Details['LAST ACCESSED TIME'] | default('N/A') }}
       {% endif %}
       {% endfor %}
-      ============================================
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ SHARING INFO                                                                  
+      ╠══════════════════════════════════════════════════════════════════════════════╣
+      ║ Shared with Groups: {{ pam_share_groups | map(attribute='name') | list | join(', ') | default('None') }}
+      ║ Group IDs:          {{ pam_share_groups | map(attribute='id') | list | join(', ') | default('None') }}
+      ╚══════════════════════════════════════════════════════════════════════════════╝

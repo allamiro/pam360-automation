@@ -20,6 +20,9 @@
     pam_share_group_names:
       - "LINUX ADMINS"
     
+    # Password policy for validation (API 3.5)
+    pam_password_policy: "Strong"
+    
     # Optional: Organization name (required for multi-org PAM360 setups)
     # pam_org_name: "Default"
     
