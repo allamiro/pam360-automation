@@ -15,12 +15,13 @@
       - jdoe
       - trump
     pam_resource_group_name: "Linux Servers"
-    pam_share_user_names: 
-      - "admin"
     
-    # User group sharing (preferred over individual users)
+    # User group sharing (share resources/accounts with PAM360 user groups)
     pam_share_group_names:
       - "LINUX ADMINS"
+    
+    # Optional: Organization name (required for multi-org PAM360 setups)
+    # pam_org_name: "Default"
     
     # Password file options
     pam_create_password_file: false  # Set to false to disable KeePass CSV generation

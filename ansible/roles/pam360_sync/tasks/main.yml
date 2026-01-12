@@ -27,54 +27,7 @@
     msg: "System: {{ system_hostname }} ({{ system_ip }})"
 
 # =======================================================
-# 1. Lookup PAM360 Share User IDs from Usernames (API 4.5)
-# =======================================================
-- name: Initialize share users list
-  set_fact:
-    pam_share_users: []
-
-- name: Get PAM360 user IDs from usernames (API 4.5)
-  uri:
-    url: "{{ pam_url }}/restapi/json/v1/user/getUserId?USERNAME={{ item }}"
-    method: GET
-    headers:
-      AUTHTOKEN: "{{ pam_token }}"
-    validate_certs: "{{ pam_validate_certs }}"
-  register: share_user_lookups
-  delegate_to: localhost
-  become: false
-  loop: "{{ pam_share_user_names | default([]) }}"
-  when: pam_share_user_names is defined
-
-- name: Debug raw user lookup responses
-  debug:
-    msg: |
-      User: {{ item.item }}
-      Status: {{ item.json.operation.result.status | default('N/A') }}
-      Message: {{ item.json.operation.result.message | default('N/A') }}
-      UserID: {{ item.json.operation.Details.USERID | default('NOT FOUND') }}
-      Full Response: {{ item.json | default({}) }}
-  loop: "{{ share_user_lookups.results | default([]) }}"
-  when: share_user_lookups.results is defined
-
-- name: Build share users list with IDs
-  set_fact:
-    pam_share_users: "{{ pam_share_users + [{'name': item.item, 'id': item.json.operation.Details.USERID}] }}"
-  loop: "{{ share_user_lookups.results | default([]) }}"
-  when:
-    - item.json is defined
-    - item.json.operation.result.status == 'Success'
-
-- name: Debug share users lookup
-  debug:
-    msg: |
-      Share users configured: {{ pam_share_user_names | default([]) }}
-      Share users resolved: {{ pam_share_users | length }} users
-      Names: {{ pam_share_users | map(attribute='name') | list }}
-      IDs: {{ pam_share_users | map(attribute='id') | list }}
-
-# =======================================================
-# 1b. Lookup PAM360 User Group IDs from Names (API 5.1)
+# 1. Lookup PAM360 User Group IDs from Names (API 5.1)
 # =======================================================
 - name: Initialize share groups list
   set_fact:
@@ -287,44 +240,16 @@
   no_log: false
 
 # =======================================================
-# 5. Share Resource with Users (API 9.1)
-# =======================================================
-- name: Share Resource with Users
-  uri:
-    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/share"
-    method: PUT
-    headers:
-      AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "text/json"
-    validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"fullaccess","USERID":"{{ item.id }}"}}}'
-  loop: "{{ pam_share_users }}"
-  register: share_responses
-  delegate_to: localhost
-  become: false
-  when:
-    - pam_resource_id is defined
-    - pam_share_users | length > 0
-
-- name: Debug share results
-  debug:
-    msg: "Shared resource with '{{ item.item.name }}': {{ item.json.operation.result.message | default('Skipped') }}"
-  loop: "{{ share_responses.results | default([]) }}"
-  when:
-    - share_responses is defined
-    - item.json is defined
-
-# =======================================================
-# 5b. Share Accounts with Users (API 9.5)
+# 5. Share Resource with User Groups (API 9.3)
 # =======================================================
 - name: Debug sharing prerequisites
   debug:
     msg: |
       === SHARING PREREQUISITES ===
       Resource ID: {{ pam_resource_id | default('NOT SET') }}
-      Share users count: {{ pam_share_users | length }}
-      Share users: {{ pam_share_users | default([]) }}
-      Will share: {{ 'YES' if (pam_resource_id | default('') | length > 0 and pam_share_users | length > 0) else 'NO - missing prerequisites' }}
+      Share groups count: {{ pam_share_groups | length }}
+      Share groups: {{ pam_share_groups | default([]) }}
+      Will share: {{ 'YES' if (pam_resource_id | default('') | length > 0 and pam_share_groups | length > 0) else 'NO - missing prerequisites' }}
 
 - name: Get account IDs for sharing
   uri:
@@ -344,47 +269,6 @@
       Accounts available for sharing:
       {{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) | map(attribute='ACCOUNT NAME') | list }}
   when: accounts_for_sharing is defined and accounts_for_sharing.json is defined
-
-- name: Build account-user share combinations
-  set_fact:
-    account_user_shares: "{{ account_user_shares | default([]) + [{'account_id': item.0['ACCOUNT ID'], 'account_name': item.0['ACCOUNT NAME'], 'user_id': item.1.id, 'user_name': item.1.name}] }}"
-  loop: "{{ accounts_for_sharing.json.operation.Details['ACCOUNT LIST'] | default([]) | product(pam_share_users) | list }}"
-  when:
-    - accounts_for_sharing is defined
-    - accounts_for_sharing.json is defined
-    - pam_share_users | length > 0
-  no_log: true
-
-- name: Share each account with each user (API 9.5)
-  uri:
-    url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/accounts/{{ item.account_id }}/share"
-    method: PUT
-    headers:
-      AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "text/json"
-    validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"ACCESSTYPE":"modify","USERID":"{{ item.user_id }}"}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
-  loop: "{{ account_user_shares | default([]) }}"
-  register: share_accounts_response
-  delegate_to: localhost
-  become: false
-  when:
-    - pam_resource_id is defined
-    - account_user_shares is defined
-
-- name: Debug account share results
-  debug:
-    msg: "Shared account '{{ item.item.account_name }}' with '{{ item.item.user_name }}': {{ item.json.operation.result.message | default('Unknown') }}"
-  loop: "{{ share_accounts_response.results | default([]) }}"
-  when:
-    - share_accounts_response is defined
-    - share_accounts_response.results is defined
-    - item.json is defined
-
-# =======================================================
-# 5c. Share Resource with User Groups (API 9.3)
-# =======================================================
 - name: Share Resource with User Groups (API 9.3)
   uri:
     url: "{{ pam_url }}/restapi/json/v1/resources/{{ pam_resource_id }}/share"
@@ -553,36 +437,6 @@
   when:
     - share_resource_group_response is defined
     - share_resource_group_response.results is defined
-    - item.json is defined
-
-# =======================================================
-# 6c. Share Resource Group with Users (API 9.9)
-# =======================================================
-- name: Share Resource Group with Users (API 9.9)
-  uri:
-    url: "{{ pam_url }}/restapi/json/v1/resourcegroup/share"
-    method: PUT
-    headers:
-      AUTHTOKEN: "{{ pam_token }}"
-      Content-Type: "text/json"
-    validate_certs: "{{ pam_validate_certs }}"
-    body: 'INPUT_DATA={"operation":{"Details":{"resourceGroupIds":["{{ pam_resource_group_id }}"],"userIds":["{{ item.id }}"],"accessType":"fullaccess"}}}'
-    status_code: [200, 201, 400, 401, 403, 404, 500]
-  loop: "{{ pam_share_users | default([]) }}"
-  register: share_resource_group_users_response
-  delegate_to: localhost
-  become: false
-  when:
-    - pam_resource_group_id is defined
-    - pam_share_users | length > 0
-
-- name: Debug resource group user sharing results
-  debug:
-    msg: "Shared resource group '{{ pam_resource_group_name }}' with user '{{ item.item.name }}': {{ item.json.operation.result.message | default('Unknown') }}"
-  loop: "{{ share_resource_group_users_response.results | default([]) }}"
-  when:
-    - share_resource_group_users_response is defined
-    - share_resource_group_users_response.results is defined
     - item.json is defined
 
 # =======================================================
