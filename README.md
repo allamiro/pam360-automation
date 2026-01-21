@@ -1,4 +1,4 @@
-# PAM360 RHEL Automation Toolkit
+# PAM360 RHEL Ansible Automation Toolkit
 
 Automated password rotation and synchronization for Linux/RHEL systems with [ManageEngine PAM360](https://www.manageengine.com/privileged-access-management/).
 
