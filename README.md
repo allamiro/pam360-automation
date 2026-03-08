@@ -222,4 +222,4 @@ MIT
 ## References
 
 - [ManageEngine PAM360](https://www.manageengine.com/privileged-access-management/)
-- [PAM360 REST API Documentation](https://www.manageengine.com/privileged-access-management/help/restapi.html)
+- [PAM360 REST API Documentation](https://www.manageengine.com/privileged-access-management/help/api/restapi.html)
